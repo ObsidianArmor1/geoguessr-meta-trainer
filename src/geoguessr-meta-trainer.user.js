@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.9
+// @version      2.0.0-beta.10
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.9";
+  const USERSCRIPT_VERSION = "2.0.0-beta.10";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -208,12 +208,6 @@
     return `rgba(${red},${green},${blue},${alpha})`;
   }
 
-  function contrastColor(hex) {
-    const [red, green, blue] = colorRgb(hex);
-    const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
-    return luminance > 0.55 ? "#16070b" : "#ffffff";
-  }
-
   function syncMapColorVariables() {
     if (!state.root) return;
     state.root.style.setProperty("--omt-neighbor-dot", state.neighborDotColor);
@@ -240,7 +234,7 @@
       ? state.guessNeighborhood
       : null;
     const overlap = guess?.overlap;
-    return `<div class="omt-legend">${state.showBestMeta ? `<i class="omt-legend-dot"></i> family (${meta.members.toLocaleString()}) <i class="omt-legend-pin"></i> family click` : ""}${state.showVisualNeighbors && neighborhood?.visualMatches?.length ? `<span class="omt-rank-scale"><i></i><i></i><i>1</i></span> round matches · larger = closer <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click` : ""}${guess ? `<i class="omt-legend-guess"></i> guess-side matches${overlap ? ` · ${overlap.sharedLocations}/${overlap.unionLocations} shared` : ""}` : ""}<i class="omt-legend-current"></i> round</div>`;
+    return `<div class="omt-legend">${state.showBestMeta ? `<i class="omt-legend-dot"></i> family (${meta.members.toLocaleString()}) <i class="omt-legend-pin"></i> family click` : ""}${state.showVisualNeighbors && neighborhood?.visualMatches?.length ? `<i class="omt-legend-match omt-legend-round-match"></i> round matches · size = similarity <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click` : ""}${guess ? `<i class="omt-legend-match omt-legend-guess-match"></i> guess matches <i class="omt-legend-match omt-legend-shared-match"></i> shared${overlap ? ` (${overlap.sharedLocations})` : ""}` : ""}<i class="omt-legend-current"></i> round</div>`;
   }
 
   function request(path, options = {}) {
@@ -549,11 +543,6 @@
     .omt-match-tooltip-foot { padding:7px 10px; border-top:1px solid var(--line); color:var(--lime); font-size:10px; font-weight:800; text-align:center; }
     .omt-legend { position:fixed; z-index:2147482999; left:15px; bottom:98px; padding:8px 11px; border:1px solid #ffffff30; border-radius:8px; color:#fff; background:#102019e8; box-shadow:0 7px 25px #0005; font-size:11px; }
     .omt-legend-dot { display:inline-block; width:10px; height:10px; margin:0 5px 0 1px; border:2px solid #fff; border-radius:50%; background:#287f88; box-shadow:0 0 0 1px #183f43; }
-    .omt-rank-scale { display:inline-flex; align-items:center; gap:3px; height:16px; margin:0 5px 0 9px; vertical-align:middle; }
-    .omt-rank-scale i { display:grid; place-items:center; flex:none; border:1px solid #fff; border-radius:50%; color:#240008; background:var(--omt-neighbor-dot,#ff334f); font:700 7px/1 Arial,sans-serif; }
-    .omt-rank-scale i:nth-child(1) { width:6px; height:6px; opacity:.42; }
-    .omt-rank-scale i:nth-child(2) { width:10px; height:10px; opacity:.7; }
-    .omt-rank-scale i:nth-child(3) { width:15px; height:15px; box-shadow:0 0 0 3px var(--omt-neighbor-dot,#ff334f); }
     .omt-legend-current { display:inline-block; width:11px; height:11px; margin:0 5px 0 9px; border:3px solid #bfe86d; border-radius:50%; background:#102019; }
     .omt-legend-pin { position:relative; display:inline-block; width:12px; height:15px; margin:0 4px -3px 8px; border:2px solid #15191c; border-radius:9px 9px 9px 1px; background:#fff; transform:rotate(-45deg); }
     .omt-legend-pin::after { content:""; position:absolute; width:3px; height:3px; left:2.5px; top:2.5px; border-radius:50%; background:#15191c; }
@@ -707,12 +696,10 @@
     .omt-match-tooltip-expanded .omt-match-tooltip-native { display:grid; }
     .omt-legend { position:fixed; z-index:2147482999; left:12px; bottom:96px; padding:6px 8px; border:1px solid #ffffff2c; border-radius:5px; color:#d8dade; background:#17181be8; box-shadow:0 5px 20px #0006; font-size:9px; }
     .omt-legend-dot { display:inline-block; width:8px; height:8px; margin:0 4px 0 1px; border:1px solid #fff; border-radius:50%; background:#767981; }
-    .omt-rank-scale { display:inline-flex; align-items:center; gap:2px; height:14px; margin:0 4px 0 7px; vertical-align:middle; }
-    .omt-rank-scale i { display:grid; place-items:center; flex:none; border:1px solid #fff; border-radius:50%; color:#210006; background:var(--omt-neighbor-dot,#ff334f); font:700 6px/1 Arial,sans-serif; }
-    .omt-rank-scale i:nth-child(1) { width:5px; height:5px; opacity:.42; }
-    .omt-rank-scale i:nth-child(2) { width:8px; height:8px; opacity:.7; }
-    .omt-rank-scale i:nth-child(3) { width:13px; height:13px; box-shadow:0 0 0 2px var(--omt-neighbor-dot,#ff334f); }
-    .omt-legend-guess { display:inline-block; width:10px; height:10px; margin:0 4px 0 8px; border:2px solid var(--omt-guess-dot,#9b6cff); border-radius:50%; background:transparent; box-shadow:0 0 0 1px #fff; vertical-align:-2px; }
+    .omt-legend-match { display:inline-block; width:8px; height:8px; margin:0 4px 0 8px; border:1px solid #fff; border-radius:50%; vertical-align:-1px; }
+    .omt-legend-round-match { background:var(--omt-neighbor-dot,#ff334f); }
+    .omt-legend-guess-match { background:var(--omt-guess-dot,#9b6cff); }
+    .omt-legend-shared-match { background:linear-gradient(90deg,var(--omt-neighbor-dot,#ff334f) 0 50%,var(--omt-guess-dot,#9b6cff) 50%); }
     .omt-legend-current { display:inline-block; width:9px; height:9px; margin:0 4px 0 7px; border:2px solid #fff; border-radius:50%; background:#17181b; }
     .omt-legend-pin { position:relative; display:inline-block; width:10px; height:12px; margin:0 3px -2px 6px; border:1px solid #111; border-radius:7px 7px 7px 1px; background:#fff; transform:rotate(-45deg); }
     .omt-legend-pin::after { content:""; position:absolute; width:2px; height:2px; left:3px; top:3px; border-radius:50%; background:#111; }
@@ -1781,16 +1768,22 @@
     const token = ++state.matchTooltipToken;
     const tooltip = document.createElement("div");
     tooltip.className = "omt-match-tooltip";
-    if (point.dotColor) tooltip.style.borderColor = point.dotColor;
+    if (point.comparisonSide === "guess") tooltip.style.borderColor = state.guessDotColor;
+    if (point.comparisonSide === "both") tooltip.style.borderColor = "#ffffff";
     tooltip.classList.toggle("omt-match-tooltip-expanded", state.matchTooltipShift);
     const distance = point.distanceKm < 1
       ? `${Math.round(point.distanceKm * 1000)} m away`
       : `${point.distanceKm.toFixed(1)} km away`;
+    const visualHeading = point.comparisonSide === "both"
+      ? `<b>Shared visual match</b><span>round #${point.roundRank} · similarity ${point.roundSimilarity.toFixed(3)}<br>guess #${point.guessRank} · similarity ${point.guessSimilarity.toFixed(3)}</span>`
+      : point.comparisonSide === "guess"
+        ? `<b style="color:${esc(state.guessDotColor)}">Guess-side visual match #${point.guessRank || point.rank}</b><span>${esc(distance)} from its anchor<br>similarity ${Number(point.guessSimilarity || point.similarity).toFixed(3)}</span>`
+        : `<b style="color:${esc(state.neighborDotColor)}">Round visual match #${point.roundRank || point.rank}</b><span>${esc(distance)}<br>similarity ${Number(point.roundSimilarity || point.similarity).toFixed(3)} · click influence ${(Number(point.roundPosteriorWeight || point.posteriorWeight || 0) * 100).toFixed(1)}%</span>`;
     const heading = point.current
       ? `<b>This round</b><span>GeoGuessr's revealed location<br>four stored directions</span>`
       : point.family
         ? `<b>${esc(point.familyLabel || "Meta location")}</b><span>one of ${Number(point.familyMembers || 0).toLocaleString()} accepted locations<br>four stored directions</span>`
-        : `<b style="color:${esc(point.dotColor || state.neighborDotColor)}">${point.comparisonSide === "guess" ? "Guess-side" : "Round"} visual match #${point.rank}</b><span>${esc(distance)}${point.comparisonSide === "guess" ? " from its anchor" : ""}<br>similarity ${Number(point.similarity).toFixed(3)}${point.comparisonSide === "guess" ? "" : ` · click influence ${(Number(point.posteriorWeight || 0) * 100).toFixed(1)}%`}</span>`;
+        : visualHeading;
     const footer = point.current
       ? "Hovering GeoGuessr's icon · hold Shift to enlarge · click to open this panorama ↗"
       : "Hold Shift to enlarge · click the dot to open this panorama in Google Maps ↗";
@@ -1809,7 +1802,7 @@
         ? "This round"
         : point.family
           ? (point.familyLabel || "Meta location")
-          : `${point.comparisonSide === "guess" ? "Guess-side" : "Round"} visual match ${point.rank}`;
+          : `${point.comparisonSide === "both" ? "Shared" : point.comparisonSide === "guess" ? "Guess-side" : "Round"} visual match ${point.rank}`;
       tooltip.querySelector(".omt-match-tooltip-images").innerHTML = urls.map((url, slot) => `<img src="${esc(url)}" alt="${esc(imageLabel)}, direction ${slot + 1}">`).join("");
     } catch (_error) {
       if (token === state.matchTooltipToken && tooltip.isConnected) {
@@ -2055,8 +2048,16 @@
             // Bind map-index ownership when the overlay is created. Fast dots
             // can be hovered before the full review has populated state.review.
             datasetKey: value.datasetKey || options.datasetKey || "",
-            comparisonSide: options.comparisonSide || "round",
-            dotColor: options.dotColor || state.neighborDotColor,
+            comparisonSide: value.comparisonSide || options.comparisonSide || "round",
+            roundRank: Number(value.roundRank || 0),
+            guessRank: Number(value.guessRank || 0),
+            roundSimilarity: Number(value.roundSimilarity || 0),
+            guessSimilarity: Number(value.guessSimilarity || 0),
+            roundDistanceKm: Number(value.roundDistanceKm || 0),
+            guessDistanceKm: Number(value.guessDistanceKm || 0),
+            roundStrength: Number(value.roundStrength || 0),
+            guessStrength: Number(value.guessStrength || 0),
+            roundPosteriorWeight: Number(value.roundPosteriorWeight || 0),
             family: this.mode === "family",
             familyLabel: options.familyLabel || "",
             familyMembers: Number(options.familyMembers || coordinates.length),
@@ -2079,7 +2080,7 @@
         this.canvas.setAttribute("aria-hidden", "true");
         const pane = this.getPanes().overlayMouseTarget || this.getPanes().overlayLayer;
         pane.appendChild(this.canvas);
-        if (this.mode === "neighbors" || this.mode === "guess-neighbors") {
+        if (this.mode === "neighbors") {
           this.hitLayer = document.createElement("div");
           this.hitLayer.style.position = "absolute";
           this.hitLayer.style.zIndex = "11";
@@ -2242,45 +2243,47 @@
           : 1.8;
         const radius = Math.max(1.6, Math.min(6.4, baseRadius + (zoom - 10) * 0.18));
         let visible = 0;
-        if (this.mode === "neighbors" || this.mode === "guess-neighbors") {
+        if (this.mode === "neighbors") {
           const rankedPoints = [...this.points].sort((a, b) => (b.rank || 0) - (a.rank || 0));
           const visibleHitTargets = [];
-          const guessSide = this.mode === "guess-neighbors";
+          const neighborBaseRadius = Math.max(2.7, Math.min(
+            4.2,
+            (this.points.length <= 100 ? 3.8 : this.points.length <= 300 ? 3.5 : 3.1)
+              + (zoom - 8) * 0.07,
+          ));
           for (const point of rankedPoints) {
             const pixel = viewportPoint(point);
             if (pixel.x < -18 || pixel.x > width + 18 || pixel.y < -18 || pixel.y > height + 18) continue;
             visible += 1;
             const { x, y } = pixel;
             const strength = Math.max(0, Math.min(1, point.strength));
-            const topTen = point.rank > 0 && point.rank <= 10;
-            const dotColor = point.dotColor || state.neighborDotColor;
-            const pointRadius = Math.max(
-              radius * (0.42 + strength * 0.95),
-              topTen ? (point.rank === 1 ? 8.5 : 6.5) : 0,
-            );
-            if (point.rank > 0 && point.rank <= 5) {
+            const pointRadius = neighborBaseRadius * (0.88 + strength * 0.20);
+            if (point.comparisonSide === "both") {
+              // One split marker communicates overlap without stacking rings or
+              // privileging whichever layer happened to paint last.
               context.beginPath();
-              context.arc(x, y, pointRadius + 3.2, 0, Math.PI * 2);
-              context.strokeStyle = colorRgba(dotColor, 0.25 + strength * 0.34);
-              context.lineWidth = point.rank === 1 ? 3 : 2;
-              context.stroke();
+              context.arc(x, y, pointRadius, 0, Math.PI * 2);
+              context.fillStyle = state.neighborDotColor;
+              context.fill();
+              context.beginPath();
+              context.moveTo(x, y - pointRadius);
+              context.arc(x, y, pointRadius, -Math.PI / 2, Math.PI / 2);
+              context.closePath();
+              context.fillStyle = state.guessDotColor;
+              context.fill();
+            } else {
+              context.beginPath();
+              context.arc(x, y, pointRadius, 0, Math.PI * 2);
+              context.fillStyle = point.comparisonSide === "guess"
+                ? state.guessDotColor
+                : state.neighborDotColor;
+              context.fill();
             }
             context.beginPath();
-            context.arc(x, y, pointRadius + (guessSide ? 1.8 : 0), 0, Math.PI * 2);
-            context.fillStyle = colorRgba(dotColor, guessSide ? 0.08 : 0.32 + strength * 0.66);
-            context.fill();
-            context.strokeStyle = guessSide
-              ? colorRgba(dotColor, 0.62 + strength * 0.38)
-              : `rgba(255,255,255,${0.42 + strength * 0.56})`;
-            context.lineWidth = guessSide ? 2.2 + strength * 1.2 : 0.8 + strength * 1.4;
+            context.arc(x, y, pointRadius, 0, Math.PI * 2);
+            context.strokeStyle = "rgba(255,255,255,0.82)";
+            context.lineWidth = 1;
             context.stroke();
-            if (topTen) {
-              context.fillStyle = guessSide ? dotColor : contrastColor(dotColor);
-              context.font = `800 ${point.rank === 10 ? 7 : 8}px Arial,sans-serif`;
-              context.textAlign = "center";
-              context.textBaseline = "middle";
-              context.fillText(String(point.rank), x, y + 0.3);
-            }
             const hitRadius = Math.max(9, pointRadius + 4);
             visibleHitTargets.push({ point, x, y, hitRadius });
           }
@@ -2294,7 +2297,10 @@
               continue;
             }
             button.omtPoint = target.point;
-            button.title = `${guessSide ? "Guess-side" : "Round"} visual match #${target.point.rank} — preview; click to open Street View`;
+            const side = target.point.comparisonSide === "both"
+              ? "Shared round/guess"
+              : target.point.comparisonSide === "guess" ? "Guess-side" : "Round";
+            button.title = `${side} visual match — preview; click to open Street View`;
             button.setAttribute("aria-label", button.title);
             button.style.display = "block";
             button.style.left = `${target.x - target.hitRadius}px`;
@@ -2361,7 +2367,7 @@
       }
       onRemove() {
         cancelAnimationFrame(this.frame);
-        if (this.mode === "neighbors" || this.mode === "guess-neighbors" || this.mode === "family") {
+        if (this.mode === "neighbors" || this.mode === "family") {
           hideMatchTooltip();
         }
         this.hitLayer?.remove();
@@ -2492,12 +2498,50 @@
       }
     }
     const visualMatches = context.visualNeighborhood?.visualMatches || [];
+    const guessComparison = state.showVisualNeighbors && state.showGuessNeighbors
+      ? state.guessNeighborhood
+      : null;
+    const guessMatches = guessComparison?.visualNeighborhood?.visualMatches || [];
     if (state.showVisualNeighbors && visualMatches.length) {
-      const neighbors = distributionOverlay(maps, map, visualMatches, {
+      const combined = new Map();
+      for (const match of visualMatches) {
+        combined.set(match.mapIndex, {
+          ...match,
+          comparisonSide: "round",
+          roundRank: match.rank,
+          roundSimilarity: match.similarity,
+          roundDistanceKm: match.distanceKm,
+          roundStrength: match.relativeStrength,
+          roundPosteriorWeight: match.posteriorWeight,
+        });
+      }
+      for (const match of guessMatches) {
+        const existing = combined.get(match.mapIndex);
+        if (existing) {
+          Object.assign(existing, {
+            comparisonSide: "both",
+            guessRank: match.rank,
+            guessSimilarity: match.similarity,
+            guessDistanceKm: match.distanceKm,
+            guessStrength: match.relativeStrength,
+            relativeStrength: Math.max(existing.relativeStrength, match.relativeStrength),
+            rank: Math.min(existing.rank, match.rank),
+          });
+        } else {
+          combined.set(match.mapIndex, {
+            ...match,
+            comparisonSide: "guess",
+            guessRank: match.rank,
+            guessSimilarity: match.similarity,
+            guessDistanceKm: match.distanceKm,
+            guessStrength: match.relativeStrength,
+          });
+        }
+      }
+      const combinedMatches = [...combined.values()];
+      const neighbors = distributionOverlay(maps, map, combinedMatches, {
         mode: "neighbors",
         datasetKey: context.datasetKey,
-        comparisonSide: "round",
-        dotColor: state.neighborDotColor,
         current: {
           mapIndex: context.location.mapIndex,
           panoId: context.location.panoId,
@@ -2509,23 +2553,7 @@
         },
       });
       if (neighbors) state.overlays.push(neighbors);
-      for (const neighbor of visualMatches) {
-        bounds.extend({ lat: neighbor.latitude, lng: neighbor.longitude });
-      }
-    }
-    const guessComparison = state.showVisualNeighbors && state.showGuessNeighbors
-      ? state.guessNeighborhood
-      : null;
-    const guessMatches = guessComparison?.visualNeighborhood?.visualMatches || [];
-    if (guessMatches.length) {
-      const guessNeighbors = distributionOverlay(maps, map, guessMatches, {
-        mode: "guess-neighbors",
-        datasetKey: context.datasetKey,
-        comparisonSide: "guess",
-        dotColor: state.guessDotColor,
-      });
-      if (guessNeighbors) state.overlays.push(guessNeighbors);
-      for (const neighbor of guessMatches) {
+      for (const neighbor of combinedMatches) {
         bounds.extend({ lat: neighbor.latitude, lng: neighbor.longitude });
       }
     }
