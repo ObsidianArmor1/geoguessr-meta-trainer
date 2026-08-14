@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.3
+// @version      2.0.0-beta.4
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.3";
+  const USERSCRIPT_VERSION = "2.0.0-beta.4";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -108,10 +108,14 @@
     neighborDotColor: mapColorPreferences.neighborDots,
     neighborClickColor: mapColorPreferences.neighborClick,
     matchTooltip: null,
+    matchTooltipPoint: null,
+    matchTooltipNative: [],
     matchTooltipTimer: 0,
     matchTooltipToken: 0,
     hoveredMatchKey: null,
     matchTooltipShift: false,
+    shiftHeld: false,
+    visualBoardShiftUpdate: null,
     matchTooltipClientX: 0,
     matchTooltipClientY: 0,
     visualBoard: null,
@@ -661,8 +665,11 @@
     button.omt-board-match { padding:0; cursor:pointer; }
     .omt-board-match em { position:absolute; right:0; bottom:0; padding:3px 5px; color:#d5d7db; background:#090a0cdd; font:normal 9px/1.2 inherit; }
     .omt-board-peek { position:fixed; z-index:4; inset:62px 2vw 40px; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; border:1px solid #ffffff4a; border-radius:5px; background:#060709fa; box-shadow:0 20px 80px #000f; pointer-events:none; }
-    .omt-board-peek img { display:block; width:100%; min-height:0; flex:1; object-fit:contain; }
-    .omt-board-peek div { flex:none; display:flex; justify-content:space-between; gap:20px; padding:7px 9px; color:#fff; background:#17181b; font-size:10px; }
+    .omt-board-peek-media { position:relative; min-height:0; flex:1; overflow:hidden; background:#050607; }
+    .omt-board-peek-media > img { display:block; width:100%; height:100%; object-fit:contain; }
+    .omt-native-pano { position:absolute; inset:0; z-index:1; opacity:0; transition:opacity .12s linear; background:#050607; }
+    .omt-native-pano.omt-native-pano-ready { opacity:1; }
+    .omt-board-peek-caption { flex:none; display:flex; justify-content:space-between; gap:20px; padding:7px 9px; color:#fff; background:#17181b; font-size:10px; }
     .omt-board-peek span { color:#8f9198; }
     .omt-board-foot { flex:none; min-height:37px; display:flex; align-items:center; gap:15px; padding:6px 10px; overflow:auto; border-top:1px solid #ffffff1c; color:#999ba2; background:#17181b; font-size:9px; white-space:nowrap; }
     .omt-board-foot b { color:#e6e7ea; }
@@ -672,13 +679,16 @@
     .omt-match-tooltip-head { display:flex; justify-content:space-between; gap:12px; padding:7px 9px; font-size:10px; }
     .omt-match-tooltip-head b { color:var(--omt-neighbor-dot,#ff536b); font-size:11px; }
     .omt-match-tooltip-head span { color:var(--muted); text-align:right; }
-    .omt-match-tooltip-images { display:grid; grid-template-columns:1fr 1fr; height:336px; background:#090a0c; }
+    .omt-match-tooltip-images { position:relative; display:grid; grid-template-columns:1fr 1fr; height:336px; background:#090a0c; }
     .omt-match-tooltip-images img { display:block; width:100%; height:168px; object-fit:cover; }
+    .omt-match-tooltip-native { position:absolute; inset:0; z-index:2; display:none; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:2px; pointer-events:none; }
+    .omt-match-tooltip-native .omt-native-pano { position:relative; inset:auto; min-width:0; min-height:0; }
     .omt-match-tooltip-loading { height:100%; display:grid; place-items:center; grid-column:1 / -1; color:var(--muted); font-size:10px; }
     .omt-match-tooltip-foot { padding:6px 9px; border-top:1px solid var(--line); color:#c8cad0; font-size:9px; text-align:center; }
     .omt-match-tooltip.omt-match-tooltip-expanded { inset:62px 2vw 40px !important; width:auto; display:grid; grid-template-rows:auto minmax(0,1fr) auto; border-color:#ffffff4a; border-radius:5px; background:#060709fa; box-shadow:0 20px 80px #000f; backdrop-filter:none; }
     .omt-match-tooltip-expanded .omt-match-tooltip-images { min-height:0; height:auto; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
     .omt-match-tooltip-expanded .omt-match-tooltip-images img { min-width:0; min-height:0; height:100%; object-fit:contain; }
+    .omt-match-tooltip-expanded .omt-match-tooltip-native { display:grid; }
     .omt-legend { position:fixed; z-index:2147482999; left:12px; bottom:96px; padding:6px 8px; border:1px solid #ffffff2c; border-radius:5px; color:#d8dade; background:#17181be8; box-shadow:0 5px 20px #0006; font-size:9px; }
     .omt-legend-dot { display:inline-block; width:8px; height:8px; margin:0 4px 0 1px; border:1px solid #fff; border-radius:50%; background:#767981; }
     .omt-rank-scale { display:inline-flex; align-items:center; gap:2px; height:14px; margin:0 4px 0 7px; vertical-align:middle; }
@@ -1355,7 +1365,54 @@
     state.visualBoardOpen = false;
     state.visualBoardModifierCleanup?.();
     state.visualBoardModifierCleanup = null;
+    state.visualBoardShiftUpdate = null;
     state.shadow?.querySelector(".omt-visual-board,.omt-board-loading")?.remove();
+  }
+
+  function disposeNativePanoramas(panoramas) {
+    const maps = pageWindow.google?.maps;
+    for (const panorama of panoramas || []) {
+      try {
+        maps?.event?.clearInstanceListeners?.(panorama);
+        panorama.setVisible?.(false);
+        panorama.unbindAll?.();
+      } catch (_error) {}
+    }
+    if (Array.isArray(panoramas)) panoramas.length = 0;
+  }
+
+  function nativeStreetView(container, panoId, heading) {
+    const maps = pageWindow.google?.maps;
+    if (!container || !panoId || !maps?.StreetViewPanorama) return null;
+    const panorama = new maps.StreetViewPanorama(container, {
+      pano: String(panoId),
+      pov: { heading: Number(heading) || 0, pitch: 0 },
+      zoom: 1,
+      addressControl: false,
+      clickToGo: false,
+      disableDefaultUI: true,
+      disableDoubleClickZoom: true,
+      fullscreenControl: false,
+      linksControl: false,
+      motionTracking: false,
+      motionTrackingControl: false,
+      panControl: false,
+      scrollwheel: false,
+      showRoadLabels: false,
+      zoomControl: false,
+    });
+    const reveal = () => {
+      const status = panorama.getStatus?.();
+      if (!maps.StreetViewStatus || status === maps.StreetViewStatus.OK) {
+        container.classList.add("omt-native-pano-ready");
+      }
+    };
+    maps.event?.addListenerOnce?.(panorama, "status_changed", reveal);
+    maps.event?.addListenerOnce?.(panorama, "pano_changed", () => {
+      window.setTimeout(reveal, 50);
+    });
+    window.setTimeout(reveal, 700);
+    return panorama;
   }
 
   function renderVisualBoard() {
@@ -1386,14 +1443,14 @@
           : "outside the global Top 100";
         const label = `Best visual case near your guess · heading ${item.heading}°`;
         const detail = `${Number(item.viewSimilarity).toFixed(3)} view similarity · ${distance} from guess · ${rank}`;
-        return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" title="Shift + hover to enlarge · click to open in Google Maps"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess · ${item.heading}°</span><em>${esc(detail)}</em></button>`;
+        return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" title="Shift + hover to enlarge · click to open in Google Maps"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess · ${item.heading}°</span><em>${esc(detail)}</em></button>`;
       }
       const distance = item.distanceKm < 1
         ? `${Math.round(item.distanceKm * 1000)} m`
         : `${item.distanceKm.toFixed(1)} km`;
       const label = `Visual match #${item.rank} · heading ${item.heading}°${item.reciprocal ? " · mutual match" : ""}`;
       const detail = `${Number(item.viewSimilarity).toFixed(3)} view similarity · ${distance}`;
-      return `<button class="omt-board-match" data-board-entry="${item.mapIndex}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" title="Shift + hover to enlarge · click to open in Google Maps"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Visual match ${item.rank}"><span>#${item.rank} · ${item.heading}°${item.reciprocal ? " · mutual" : ""}</span><em>${esc(detail)}</em></button>`;
+      return `<button class="omt-board-match" data-board-entry="${item.mapIndex}" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" title="Shift + hover to enlarge · click to open in Google Maps"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Visual match ${item.rank}"><span>#${item.rank} · ${item.heading}°${item.reciprocal ? " · mutual" : ""}</span><em>${esc(detail)}</em></button>`;
     }).join("");
     const interpretation = literal
       ? "Eight closest views, without filtering for agreement."
@@ -1405,7 +1462,7 @@
     const guessReceipt = mode.guessMatch
       ? `<span><b>best of ${mode.guessMatch.candidatePool}</b> locations near your guess</span>`
       : "";
-    element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid"><div class="omt-board-current" tabindex="0" data-board-inspect data-board-label="This round · heading ${mode.currentHeading}°" data-board-detail="Current panorama direction used for this comparison"><img data-src="${esc(mode.currentView)}" data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0" alt="Current round heading ${mode.currentHeading}"><strong>This round · ${mode.currentHeading}°</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}<span><b>${literal ? "nearest visual views" : `${mode.support}/100`}</b> in this group</span><span><b>${mode.reciprocalSupport}</b> mutual matches</span><span><b>${mode.independentAreas}</b> separate areas</span><span><b>${Math.round(mode.coherence * 100)}%</b> visual agreement</span><span class="omt-board-warning">Visual similarity is evidence, not certainty.</span></footer>`;
+    element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid"><div class="omt-board-current" tabindex="0" data-board-pano="${esc(board.panoId)}" data-board-heading="${Number(mode.currentHeading) || 0}" data-board-inspect data-board-label="This round · heading ${mode.currentHeading}°" data-board-detail="Current panorama direction used for this comparison"><img data-src="${esc(mode.currentView)}" data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0" alt="Current round heading ${mode.currentHeading}"><strong>This round · ${mode.currentHeading}°</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}<span><b>${literal ? "nearest visual views" : `${mode.support}/100`}</b> in this group</span><span><b>${mode.reciprocalSupport}</b> mutual matches</span><span><b>${mode.independentAreas}</b> separate areas</span><span><b>${Math.round(mode.coherence * 100)}%</b> visual agreement</span><span class="omt-board-warning">Visual similarity is evidence, not certainty.</span></footer>`;
     state.shadow.appendChild(element);
     element.querySelector(".omt-board-close").addEventListener("click", closeVisualBoard);
     for (const button of element.querySelectorAll("[data-board-mode]")) {
@@ -1428,14 +1485,18 @@
         });
       });
     }
-    const hidePeek = () => element.querySelector(".omt-board-peek")?.remove();
+    let peekPanoramas = [];
+    const hidePeek = () => {
+      disposeNativePanoramas(peekPanoramas);
+      element.querySelector(".omt-board-peek")?.remove();
+    };
     const showPeek = (tile) => {
       hidePeek();
       const source = tile.querySelector("img");
       if (!source) return;
       const peek = document.createElement("div");
       peek.className = "omt-board-peek";
-      peek.innerHTML = `<img alt="${esc(tile.dataset.boardLabel || "Enlarged comparison view")}"><div><b>${esc(tile.dataset.boardLabel || "Comparison view")}</b><span>${esc(tile.dataset.boardDetail || "")}</span></div>`;
+      peek.innerHTML = `<div class="omt-board-peek-media"><img alt="${esc(tile.dataset.boardLabel || "Enlarged comparison view")}"><div class="omt-native-pano" aria-label="High-resolution Street View"></div></div><div class="omt-board-peek-caption"><b>${esc(tile.dataset.boardLabel || "Comparison view")}</b><span>${esc(tile.dataset.boardDetail || "")}</span></div>`;
       element.appendChild(peek);
       const image = peek.querySelector("img");
       if (source.currentSrc || source.src) {
@@ -1445,37 +1506,42 @@
           if (peek.isConnected) image.src = url;
         }).catch(() => hidePeek());
       }
+      const panorama = nativeStreetView(
+        peek.querySelector(".omt-native-pano"),
+        tile.dataset.boardPano,
+        Number(tile.dataset.boardHeading),
+      );
+      if (panorama) peekPanoramas.push(panorama);
     };
     let hoveredTile = null;
+    const updatePeekForShift = (held) => {
+      if (held && hoveredTile) showPeek(hoveredTile);
+      else hidePeek();
+    };
+    state.visualBoardShiftUpdate = updatePeekForShift;
     for (const tile of element.querySelectorAll("[data-board-inspect]")) {
-      tile.addEventListener("mouseenter", (event) => {
+      tile.addEventListener("pointerenter", (event) => {
         hoveredTile = tile;
-        if (event.shiftKey) showPeek(tile);
+        if (state.shiftHeld || event.shiftKey) showPeek(tile);
       });
-      tile.addEventListener("mousemove", (event) => {
-        if (event.shiftKey) {
+      tile.addEventListener("pointermove", (event) => {
+        if (state.shiftHeld || event.shiftKey) {
           if (!element.querySelector(".omt-board-peek")) showPeek(tile);
         } else {
           hidePeek();
         }
       });
-      tile.addEventListener("mouseleave", () => {
+      tile.addEventListener("pointerleave", () => {
         if (hoveredTile === tile) hoveredTile = null;
         hidePeek();
       });
       tile.addEventListener("blur", hidePeek);
     }
-    const handleModifierDown = (event) => {
-      if (event.key === "Shift" && hoveredTile) showPeek(hoveredTile);
-    };
-    const handleModifierUp = (event) => {
-      if (event.key === "Shift") hidePeek();
-    };
-    document.addEventListener("keydown", handleModifierDown, true);
-    document.addEventListener("keyup", handleModifierUp, true);
     state.visualBoardModifierCleanup = () => {
-      document.removeEventListener("keydown", handleModifierDown, true);
-      document.removeEventListener("keyup", handleModifierUp, true);
+      if (state.visualBoardShiftUpdate === updatePeekForShift) {
+        state.visualBoardShiftUpdate = null;
+      }
+      hidePeek();
     };
     startVisualExposure(mode.id, boardContent);
     hydrateImages(element);
@@ -1593,15 +1659,44 @@
     state.matchTooltipTimer = 0;
     state.matchTooltipToken += 1;
     state.hoveredMatchKey = null;
+    disposeNativePanoramas(state.matchTooltipNative);
     state.matchTooltip?.remove();
     state.matchTooltip = null;
+    state.matchTooltipPoint = null;
+  }
+
+  async function ensureMatchTooltipHighResolution(tooltip, point) {
+    if (!tooltip?.isConnected || tooltip.dataset.nativeRequested === "true") return;
+    tooltip.dataset.nativeRequested = "true";
+    try {
+      const datasetKey = point.datasetKey || state.review?.datasetKey;
+      const map = await portableApi.loadMap(datasetKey);
+      const row = map.core.panoramas[Number(point.mapIndex)];
+      if (!row || !tooltip.isConnected || state.matchTooltip !== tooltip) return;
+      const host = tooltip.querySelector(".omt-match-tooltip-images");
+      if (!host) return;
+      const grid = document.createElement("div");
+      grid.className = "omt-match-tooltip-native";
+      for (const heading of row.h.slice(0, 4)) {
+        const cell = document.createElement("div");
+        cell.className = "omt-native-pano";
+        cell.setAttribute("aria-label", `High-resolution Street View heading ${heading}°`);
+        grid.appendChild(cell);
+        const panorama = nativeStreetView(cell, row.p, heading);
+        if (panorama) state.matchTooltipNative.push(panorama);
+      }
+      host.appendChild(grid);
+    } catch (_error) {
+      // The ordinary thumbnail grid remains visible if native Street View is
+      // unavailable for an unofficial panorama or transient Maps API state.
+    }
   }
 
   function queueMatchTooltip(point, clientX, clientY, shiftKey = false) {
     // PointerEvent.shiftKey is not reliable on every Google Maps overlay.
     // Once keyboard keydown says Shift is held, preserve that state until the
     // document-level keyup instead of allowing pointerenter to clear it.
-    state.matchTooltipShift = state.matchTooltipShift || Boolean(shiftKey);
+    state.matchTooltipShift = state.shiftHeld || Boolean(shiftKey);
     const key = point.current
       ? `current:${point.mapIndex}`
       : point.family
@@ -1644,6 +1739,8 @@
     positionMatchTooltip(tooltip, clientX, clientY);
     state.shadow.appendChild(tooltip);
     state.matchTooltip = tooltip;
+    state.matchTooltipPoint = point;
+    if (state.matchTooltipShift) ensureMatchTooltipHighResolution(tooltip, point);
     try {
       const urls = await Promise.all([0, 1, 2, 3].map((slot) =>
         imageUrl(`/api/view/${point.mapIndex}/${slot}${viewSuffix(point)}`)
@@ -1679,11 +1776,33 @@
 
   function handleMatchTooltipModifier(event) {
     if (event.key !== "Shift") return;
-    state.matchTooltipShift = event.type === "keydown";
+    const held = event.type === "keydown";
+    state.shiftHeld = held;
+    state.matchTooltipShift = held;
+    state.visualBoardShiftUpdate?.(held);
     const tooltip = state.matchTooltip;
     if (!tooltip?.isConnected) return;
     tooltip.classList.toggle("omt-match-tooltip-expanded", state.matchTooltipShift);
+    if (held && state.matchTooltipPoint) {
+      ensureMatchTooltipHighResolution(tooltip, state.matchTooltipPoint);
+    }
     if (!state.matchTooltipShift) {
+      positionMatchTooltip(
+        tooltip,
+        state.matchTooltipClientX,
+        state.matchTooltipClientY,
+      );
+    }
+  }
+
+  function releaseShiftModifier() {
+    if (!state.shiftHeld && !state.matchTooltipShift) return;
+    state.shiftHeld = false;
+    state.matchTooltipShift = false;
+    state.visualBoardShiftUpdate?.(false);
+    const tooltip = state.matchTooltip;
+    if (tooltip?.isConnected) {
+      tooltip.classList.remove("omt-match-tooltip-expanded");
       positionMatchTooltip(
         tooltip,
         state.matchTooltipClientX,
@@ -2875,6 +2994,10 @@
   document.addEventListener("keydown", handleLayerHotkeys, true);
   document.addEventListener("keydown", handleMatchTooltipModifier, true);
   document.addEventListener("keyup", handleMatchTooltipModifier, true);
+  window.addEventListener("blur", releaseShiftModifier, true);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") releaseShiftModifier();
+  }, true);
   document.addEventListener("visibilitychange", updateVisualExposureFocus, true);
   window.addEventListener("focus", updateVisualExposureFocus, true);
   window.addEventListener("blur", updateVisualExposureFocus, true);
