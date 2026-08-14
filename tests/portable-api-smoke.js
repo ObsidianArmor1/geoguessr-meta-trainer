@@ -20,6 +20,35 @@ async function main() {
   for (const entry of registry.maps) {
     const map = await api.loadMap(entry.datasetKey);
     assert.equal(map.core.panoramas.length, entry.panoramas);
+    if (map.manifest.neighborBoundary) {
+      let detectedIndex = -1;
+      let diffuseIndex = -1;
+      for (let mapIndex = 0; mapIndex < entry.panoramas; mapIndex += 1) {
+        const boundary = await api.boundaryRow(map, mapIndex);
+        if (boundary.detected && detectedIndex < 0) detectedIndex = mapIndex;
+        if (!boundary.detected && diffuseIndex < 0) diffuseIndex = mapIndex;
+        if (detectedIndex >= 0 && diffuseIndex >= 0) break;
+      }
+      assert.ok(detectedIndex >= 0, "map contains a detected semantic boundary");
+      assert.ok(diffuseIndex >= 0, "map contains an abstained semantic boundary");
+      const detected = await api.request(
+        `/api/neighborhood/${detectedIndex}?dataset=${encodeURIComponent(entry.datasetKey)}`,
+      );
+      const diffuse = await api.request(
+        `/api/neighborhood/${diffuseIndex}?dataset=${encodeURIComponent(entry.datasetKey)}`,
+      );
+      assert.equal(detected.boundary.detected, true);
+      assert.ok(detected.boundary.score >= 3);
+      assert.equal(
+        detected.posterior.displayPolicy,
+        "sustained per-round similarity-curve change point",
+      );
+      assert.equal(diffuse.boundary.detected, false);
+      assert.equal(
+        diffuse.posterior.displayPolicy,
+        "diffuse self-tuned nearest examples; no sustained change point",
+      );
+    }
     const indices = [0, Math.floor(entry.panoramas / 2), entry.panoramas - 1];
     for (const mapIndex of indices) {
       const row = map.core.panoramas[mapIndex];
@@ -32,11 +61,21 @@ async function main() {
       assert.ok(review.visualNeighborhood.visualMatches.length <= (
         map.manifest.neighborSummary?.counts?.maximum || 512
       ));
+      if (map.manifest.neighborBoundary) {
+        assert.equal(typeof review.visualNeighborhood.boundary.detected, "boolean");
+        assert.ok(Number.isFinite(review.visualNeighborhood.boundary.score));
+        assert.ok(review.visualNeighborhood.boundary.qualifyingRuns >= 0);
+      }
       if (map.manifest.panoramaProjection) {
         assert.equal(review.visualNeighborhood.posterior.mapLocations, entry.panoramas - 1);
         assert.equal(review.visualNeighborhood.posterior.semanticMaximumFraction, null);
         assert.equal(review.visualNeighborhood.posterior.exactCoreWeight, 0.5);
-        assert.equal(review.visualNeighborhood.posterior.displayPolicy, "exact adaptive core");
+        assert.equal(
+          review.visualNeighborhood.posterior.displayPolicy,
+          review.visualNeighborhood.boundary?.detected
+            ? "sustained per-round similarity-curve change point"
+            : "diffuse self-tuned nearest examples; no sustained change point",
+        );
         assert.equal(review.visualNeighborhood.posterior.broadDistributionUsedForClick, true);
         assert.ok(review.visualNeighborhood.posterior.displayedMass > 0);
       }

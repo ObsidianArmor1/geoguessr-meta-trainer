@@ -182,6 +182,7 @@
       this.reviewPromises = new Map();
       this.projectionChunkPromises = new Map();
       this.panoramaProjectionPromises = new Map();
+      this.boundaryPromises = new Map();
     }
 
     url(path) {
@@ -378,6 +379,45 @@
       return { indices, similarities };
     }
 
+    async boundaryRow(map, mapIndex) {
+      const descriptor = map.manifest.neighborBoundary;
+      if (!descriptor) return null;
+      const key = map.entry.datasetKey;
+      if (!this.boundaryPromises.has(key)) {
+        this.boundaryPromises.set(key, (async () => {
+          let buffer = await this.asset(
+            `maps/${key}/boundaries/${descriptor.file}`,
+            descriptor.sha256,
+          );
+          buffer = await gunzip(buffer);
+          const view = new DataView(buffer);
+          const magic = textDecoder.decode(new Uint8Array(buffer, 0, 8));
+          const version = view.getUint32(8, true);
+          const rows = view.getUint32(12, true);
+          if (magic !== "OMTBND01" || version !== 1
+              || rows !== map.core.panoramas.length) {
+            throw new Error("Unsupported visual-boundary pack");
+          }
+          return {
+            view,
+            rows,
+            detectedOffset: 16,
+            scoreOffset: 16 + rows,
+            runsOffset: 16 + rows * 3,
+          };
+        })());
+      }
+      const loaded = await this.boundaryPromises.get(key);
+      return {
+        detected: Boolean(loaded.view.getUint8(loaded.detectedOffset + mapIndex)),
+        score: halfToFloat(loaded.view.getUint16(
+          loaded.scoreOffset + mapIndex * 2, true,
+        )),
+        qualifyingRuns: loaded.view.getUint8(loaded.runsOffset + mapIndex),
+        method: "persistent slope change",
+      };
+    }
+
     async panoramaProjection(map) {
       const descriptor = map.manifest.panoramaProjection;
       if (!descriptor) return null;
@@ -539,6 +579,7 @@
 
     async computeNeighborhood(map, mapIndex) {
       const { indices, similarities } = await this.neighborRow(map, mapIndex);
+      const boundary = await this.boundaryRow(map, mapIndex).catch(() => null);
       const origin = map.core.panoramas[mapIndex];
       let posterior = null;
       if (map.manifest.panoramaProjection) {
@@ -622,6 +663,7 @@
         neighbors: visualMatches.length,
         mapDiagonalKm: map.projection.diagonalKm,
         coordinateBlind: true,
+        boundary,
         radii,
         radiusProfile: "map-scale-aware",
         medianDistanceKm: quantile(0.5),
@@ -634,7 +676,9 @@
           displayedMass: displayIndices.reduce(
             (sum, index) => sum + posterior.weights[index], 0,
           ),
-          displayPolicy: "exact adaptive core",
+          displayPolicy: boundary?.detected
+            ? "sustained per-round similarity-curve change point"
+            : "diffuse self-tuned nearest examples; no sustained change point",
           broadDistributionUsedForClick: true,
           semanticMaximumFraction: null,
           temperature: posterior.temperature,
@@ -1324,6 +1368,7 @@
       }
       if (selected.index < 0) return null;
       const anchor = map.core.panoramas[selected.index];
+      const boundary = await this.boundaryRow(map, selected.index).catch(() => null);
       const { indices, similarities } = await this.neighborRow(map, selected.index);
       const strongest = similarities[0];
       const weakest = similarities[similarities.length - 1];
@@ -1346,9 +1391,12 @@
         };
       });
       const visualNeighborhood = {
-        representation: "raw C-RADIOv4-H exact adaptive core",
+        representation: boundary?.detected
+          ? "raw C-RADIOv4-H persistent slope-bounded neighborhood"
+          : "raw C-RADIOv4-H diffuse self-tuned neighborhood",
         neighbors: visualMatches.length,
         coordinateBlind: true,
+        boundary,
         visualMatches,
       };
       const trueIndices = new Set(

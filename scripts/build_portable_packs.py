@@ -26,6 +26,7 @@ FORMAT = "geoguessr-portable-meta-pack"
 VERSION = 1
 NEIGHBOR_MAGIC_V1 = b"OMTNBR01"
 NEIGHBOR_MAGIC_V2 = b"OMTNBR02"
+BOUNDARY_MAGIC_V1 = b"OMTBND01"
 
 
 def write_json(path: Path, payload: object) -> None:
@@ -168,7 +169,45 @@ def write_neighbor_chunks(
     return chunks
 
 
-def compile_map(manifest_path: Path, output_root: Path, chunk_rows: int) -> tuple[dict, list[str]]:
+def write_boundary_pack(destination: Path, neighbor_root: Path) -> dict | None:
+    detected_path = neighbor_root / "neighbor_boundary_detected.u8.npy"
+    scores_path = neighbor_root / "neighbor_boundary_scores.f16.npy"
+    runs_path = neighbor_root / "neighbor_boundary_runs.u8.npy"
+    if not all(path.is_file() for path in (detected_path, scores_path, runs_path)):
+        return None
+    detected = np.load(detected_path, mmap_mode="r")
+    scores = np.load(scores_path, mmap_mode="r")
+    runs = np.load(runs_path, mmap_mode="r")
+    if detected.ndim != 1 or detected.shape != scores.shape or detected.shape != runs.shape:
+        raise ValueError("neighbor boundary arrays disagree")
+    destination.mkdir(parents=True, exist_ok=True)
+    path = destination / "boundaries.bin.gz"
+    header = struct.pack("<8sII", BOUNDARY_MAGIC_V1, 1, len(detected))
+    body = b"".join((
+        header,
+        np.asarray(detected, dtype="u1").tobytes(),
+        np.asarray(scores, dtype="<f2").tobytes(),
+        np.asarray(runs, dtype="u1").tobytes(),
+    ))
+    with path.open("wb") as raw:
+        with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6, mtime=0) as stream:
+            stream.write(body)
+    return {
+        "format": "persistent-slope-change-boundaries",
+        "version": 1,
+        "file": path.name,
+        "rows": len(detected),
+        "bytes": path.stat().st_size,
+        "sha256": sha256(path),
+    }
+
+
+def compile_map(
+    manifest_path: Path,
+    output_root: Path,
+    chunk_rows: int,
+    neighbor_subdir: str,
+) -> tuple[dict, list[str]]:
     source_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     dataset_key = source_manifest["dataset_key"]
     dataset_root = manifest_path.parent
@@ -176,7 +215,7 @@ def compile_map(manifest_path: Path, output_root: Path, chunk_rows: int) -> tupl
     trainer_artifacts = source_manifest.get("trainer_artifacts", {})
 
     review_path = dataset_root / artifacts["review_index"]
-    neighbor_root = dataset_root / "trainer" / "adaptive-neighbors-v1"
+    neighbor_root = dataset_root / "trainer" / neighbor_subdir
     if not (neighbor_root / "neighbor_offsets.i64.npy").is_file():
         neighbor_root = dataset_root / artifacts["nearest_neighbors"]
     if not neighbor_root.is_dir():
@@ -231,6 +270,10 @@ def compile_map(manifest_path: Path, output_root: Path, chunk_rows: int) -> tupl
     }
     if offsets is not None:
         manifest["adaptiveNeighborhood"] = neighbor_summary
+    boundary_pack = write_boundary_pack(destination / "boundaries", neighbor_root)
+    if boundary_pack:
+        boundary_pack["selection"] = neighbor_summary.get("selection", {})
+        manifest["neighborBoundary"] = boundary_pack
     boards_root = dataset_root / "trainer" / "portable-boards-v1"
     boards_manifest_path = boards_root / "manifest.json"
     if boards_manifest_path.is_file():
@@ -324,13 +367,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--chunk-rows", type=int, default=512)
+    parser.add_argument("--neighbor-subdir", default="adaptive-neighbors-v1")
     parser.add_argument("manifests", nargs="+", type=Path)
     args = parser.parse_args()
     if args.chunk_rows < 32:
         raise SystemExit("--chunk-rows must be at least 32")
     args.output.mkdir(parents=True, exist_ok=True)
     compiled = [
-        compile_map(path.resolve(), args.output.resolve(), args.chunk_rows)
+        compile_map(
+            path.resolve(), args.output.resolve(), args.chunk_rows,
+            args.neighbor_subdir,
+        )
         for path in args.manifests
     ]
     entries = [entry for entry, _pano_ids in compiled]

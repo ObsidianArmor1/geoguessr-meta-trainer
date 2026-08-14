@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.10
+// @version      2.0.0-beta.11
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.10";
+  const USERSCRIPT_VERSION = "2.0.0-beta.11";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -900,13 +900,15 @@
         ? `<div class="omt-result-row"><div><b>${Math.round(outcome.score).toLocaleString()}</b><span>points from the similar-view click</span></div><div><b>${formatOutcomeDistance(outcome.distanceKm)}</b><span>from the revealed location</span></div></div>`
         : "";
       const posterior = neighborhood.posterior;
-      const posteriorLabel = posterior
-        ? "high-confidence exact matches"
-        : "adaptive visual cutoff · location ignored";
+      const boundary = neighborhood.boundary;
+      const posteriorLabel = boundary?.detected
+        ? `sustained slope boundary · ${boundary.score.toFixed(1)}×`
+        : "diffuse nearest examples · no clear boundary";
       const posteriorNote = posterior
-        ? `Only the self-tuned exact visual core is drawn. The recommended click also uses the broader map-wide distribution (effective support: ${Math.round(posterior.effectiveLocations).toLocaleString()} locations).`
+        ? `${boundary?.detected ? "The displayed set ends where both mean and median similarity-curve slope change persistently." : "No defensible similarity-curve step was found, so the displayed set remains the self-tuned diffuse neighborhood."} The recommended click also uses the broader map-wide distribution (effective support: ${Math.round(posterior.effectiveLocations).toLocaleString()} locations).`
         : "";
-      return `<section class="omt-section"><div class="omt-section-head"><h3>${neighborhood.neighbors.toLocaleString()} strongest visual matches</h3><span>${esc(posteriorLabel)}</span></div>${result}<div class="omt-neighborhood">${radiusHtml}</div><p class="omt-note">${esc(posteriorNote)} Median shown-match distance: ${neighborhood.medianDistanceKm.toFixed(1)} km. Closest tenth: ${neighborhood.nearestTenthDistanceKm.toFixed(1)} km. ${esc(densityNote)}</p></section>`;
+      const heading = boundary?.detected ? "coherent visual matches" : "nearest visual examples";
+      return `<section class="omt-section"><div class="omt-section-head"><h3>${neighborhood.neighbors.toLocaleString()} ${heading}</h3><span>${esc(posteriorLabel)}</span></div>${result}<div class="omt-neighborhood">${radiusHtml}</div><p class="omt-note">${esc(posteriorNote)} Median shown-match distance: ${neighborhood.medianDistanceKm.toFixed(1)} km. Closest tenth: ${neighborhood.nearestTenthDistanceKm.toFixed(1)} km. ${esc(densityNote)}</p></section>`;
     })() : "";
     const guessComparisonHtml = guessComparison ? (() => {
       const overlap = guessComparison.overlap;
