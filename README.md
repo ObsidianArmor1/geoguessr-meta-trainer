@@ -15,8 +15,8 @@ The review appears only after a round is over. `M` cycles the map overlays and
 `V` opens the visual-comparison board. The optional **Guess comparison** layer
 draws the revealed location's visual matches as filled red points and the
 visual neighborhood of the nearest stored panorama to the player's guess as
-hollow violet rings; shared locations carry both marks and the review reports
-their overlap.
+filled violet points. Shared locations use a single split red/violet point, and
+the review reports their overlap.
 
 ## How it runs
 
