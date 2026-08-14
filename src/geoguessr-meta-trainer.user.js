@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.7
+// @version      2.0.0-beta.8
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.7";
+  const USERSCRIPT_VERSION = "2.0.0-beta.8";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -896,12 +896,12 @@
         : "";
       const posterior = neighborhood.posterior;
       const posteriorLabel = posterior
-        ? `${Math.round(posterior.displayedMass * 100)}% of visual weight${posterior.displayCapped ? " · 10% dot cap" : ""}`
+        ? "high-confidence exact matches"
         : "adaptive visual cutoff · location ignored";
       const posteriorNote = posterior
-        ? `The click uses all ${posterior.mapLocations.toLocaleString()} map locations; the map shows the strongest ${neighborhood.neighbors.toLocaleString()} for readability. Effective visual support: ${Math.round(posterior.effectiveLocations).toLocaleString()} locations.`
+        ? `Only the self-tuned exact visual core is drawn. The recommended click also uses the broader map-wide distribution (effective support: ${Math.round(posterior.effectiveLocations).toLocaleString()} locations).`
         : "";
-      return `<section class="omt-section"><div class="omt-section-head"><h3>${neighborhood.neighbors.toLocaleString()} similar panoramas shown</h3><span>${esc(posteriorLabel)}</span></div>${result}<div class="omt-neighborhood">${radiusHtml}</div><p class="omt-note">${esc(posteriorNote)} Median shown-match distance: ${neighborhood.medianDistanceKm.toFixed(1)} km. Closest tenth: ${neighborhood.nearestTenthDistanceKm.toFixed(1)} km. ${esc(densityNote)}</p></section>`;
+      return `<section class="omt-section"><div class="omt-section-head"><h3>${neighborhood.neighbors.toLocaleString()} strongest visual matches</h3><span>${esc(posteriorLabel)}</span></div>${result}<div class="omt-neighborhood">${radiusHtml}</div><p class="omt-note">${esc(posteriorNote)} Median shown-match distance: ${neighborhood.medianDistanceKm.toFixed(1)} km. Closest tenth: ${neighborhood.nearestTenthDistanceKm.toFixed(1)} km. ${esc(densityNote)}</p></section>`;
     })() : "";
     state.shadow.innerHTML = `
       <style>${styles}</style><div class="omt">

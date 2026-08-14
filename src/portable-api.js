@@ -456,34 +456,16 @@
         total += weight;
       }
       let squareSum = 0;
+      let maximumWeight = 0;
       for (let row = 0; row < panoramas; row += 1) {
         weights[row] /= total;
         squareSum += weights[row] ** 2;
-      }
-      const order = Array.from({ length: panoramas }, (_value, index) => index)
-        .filter((index) => index !== mapIndex)
-        .sort((left, right) => weights[right] - weights[left]);
-      const maximumDots = Math.max(
-        8, Math.floor(panoramas * Number(descriptor.maximumDotFraction || 0.10)),
-      );
-      const displayMassTarget = Number(descriptor.displayMass || 0.90);
-      let displayMass = 0;
-      let displayCount = 0;
-      while (displayCount < order.length && displayCount < maximumDots
-          && displayMass < displayMassTarget) {
-        displayMass += weights[order[displayCount]];
-        displayCount += 1;
+        maximumWeight = Math.max(maximumWeight, weights[row]);
       }
       return {
-        scores,
         weights,
-        displayIndices: order.slice(0, displayCount),
-        displayMass,
-        displayMassTarget,
-        displayCapped: displayCount === maximumDots && displayMass < displayMassTarget,
-        maximumDotFraction: Number(descriptor.maximumDotFraction || 0.10),
         effectiveLocations: 1 / Math.max(squareSum, 1e-12),
-        maximumWeight: weights[order[0]],
+        maximumWeight,
         temperature,
       };
     }
@@ -562,22 +544,11 @@
       if (map.manifest.panoramaProjection) {
         try { posterior = await this.projectedPosterior(map, mapIndex); } catch (_error) {}
       }
-      let displayIndices = Array.from(indices);
-      if (posterior) {
-        const seen = new Set(displayIndices);
-        for (const index of posterior.displayIndices) {
-          if (!seen.has(index)) { displayIndices.push(index); seen.add(index); }
-        }
-        displayIndices = displayIndices.slice(
-          0,
-          Math.max(8, Math.floor(
-            map.core.panoramas.length * posterior.maximumDotFraction,
-          )),
-        );
-      }
-      const displaySimilarities = posterior
-        ? displayIndices.map((index) => posterior.scores[index])
-        : Array.from(similarities);
+      // The full projected posterior is useful for estimating where to click, but its
+      // weak long tail is not a useful collection of examples to draw or study.
+      // Keep the visible dots to the high-fidelity, self-tuned exact-neighbor core.
+      const displayIndices = Array.from(indices);
+      const displaySimilarities = Array.from(similarities);
       const strongest = displaySimilarities[0];
       const weakest = displaySimilarities[displaySimilarities.length - 1];
       const span = Math.max(strongest - weakest, 1e-8);
@@ -617,9 +588,9 @@
           similarity: displaySimilarities[position],
           relativeStrength: clamp((displaySimilarities[position] - weakest) / span, 0, 1),
           posteriorWeight: posterior
-            ? posterior.weights[neighborIndex]
+            ? posterior.clickWeights[neighborIndex]
             : calibrated.normalized[position],
-          geographicGroup: posterior ? -1 : calibrated.groupIds[position],
+          geographicGroup: calibrated.groupIds[position],
           distanceKm: haversineKm(origin.a, origin.o, row.a, row.o),
         };
       });
@@ -663,13 +634,8 @@
           displayedMass: displayIndices.reduce(
             (sum, index) => sum + posterior.weights[index], 0,
           ),
-          targetDisplayedMass: posterior.displayMassTarget,
-          displayCapped: displayIndices.length >= Math.floor(
-            map.core.panoramas.length * posterior.maximumDotFraction,
-          ) && displayIndices.reduce(
-            (sum, index) => sum + posterior.weights[index], 0,
-          ) < posterior.displayMassTarget,
-          maximumDotFraction: posterior.maximumDotFraction,
+          displayPolicy: "exact adaptive core",
+          broadDistributionUsedForClick: true,
           semanticMaximumFraction: null,
           temperature: posterior.temperature,
           exactCoreWeight: posterior.exactCoreWeight,
