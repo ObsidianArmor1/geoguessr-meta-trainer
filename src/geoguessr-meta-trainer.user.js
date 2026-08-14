@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.11
+// @version      2.0.0-beta.12
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.11";
+  const USERSCRIPT_VERSION = "2.0.0-beta.12";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -548,9 +548,13 @@
     .omt-legend-pin::after { content:""; position:absolute; width:3px; height:3px; left:2.5px; top:2.5px; border-radius:50%; background:#15191c; }
     .omt-legend-pin-neighbors { width:14px; height:14px; margin:0 5px -2px 10px; border:2px solid #fff; border-radius:2px; background:var(--omt-neighbor-click,#ff00a8); box-shadow:0 0 0 2px #15191c; transform:rotate(45deg); }
     .omt-legend-pin-neighbors::after { display:none; }
-    .omt-recommendation-receipt { position:fixed; z-index:2147483001; left:50%; bottom:102px; display:flex; gap:6px; max-width:calc(100vw - 32px); transform:translateX(-50%); color:#fff; font:700 12px/1.2 Arial,sans-serif; pointer-events:none; }
-    .omt-recommendation-receipt div { padding:8px 12px; border:1px solid #ffffff38; border-radius:999px; background:#102019ed; box-shadow:0 6px 24px #0007; white-space:nowrap; backdrop-filter:blur(8px); }
-    .omt-recommendation-receipt b { color:var(--lime); font-size:14px; }
+    .omt-recommendation-receipt { position:fixed; z-index:2147483001; left:50%; bottom:100px; display:flex; gap:16px; max-width:calc(100vw - 32px); transform:translateX(-50%); color:#fff; font:700 11px/1.2 Arial,sans-serif; pointer-events:none; }
+    .omt-recommendation-receipt div { display:flex; align-items:baseline; gap:7px; padding:0; border:0; color:#fff; background:transparent; box-shadow:none; white-space:nowrap; }
+    .omt-recommendation-receipt div::before { content:""; width:5px; height:5px; border-radius:50%; background:#9290a8; }
+    .omt-recommendation-receipt div.omt-neighbor-result::before { background:var(--omt-neighbor-click,#ff00a8); }
+    .omt-recommendation-receipt span { color:#aaa7bd; font-size:9px; letter-spacing:.045em; text-transform:uppercase; }
+    .omt-recommendation-receipt strong { color:#fff; font-size:14px; font-variant-numeric:tabular-nums; }
+    .omt-recommendation-receipt em { color:#c7c4d4; font-size:11px; font-style:normal; font-variant-numeric:tabular-nums; }
     @media(max-width:850px){.omt-drawer{width:100vw;min-width:0;bottom:74px}.omt-launch{top:10px;right:10px}.omt-views{grid-template-columns:1fr}.omt-view,.omt-view img{height:190px}.omt-feedback,.omt-neighborhood{grid-template-columns:1fr 1fr}}
   `;
 
@@ -705,17 +709,20 @@
     .omt-legend-pin::after { content:""; position:absolute; width:2px; height:2px; left:3px; top:3px; border-radius:50%; background:#111; }
     .omt-legend-pin-neighbors { width:11px; height:11px; margin:0 4px -2px 7px; border:1px solid #fff; border-radius:1px; background:var(--omt-neighbor-click,#ff00a8); box-shadow:0 0 0 1px #111; transform:rotate(45deg); }
     .omt-legend-pin-neighbors::after { display:none; }
-    .omt-recommendation-receipt { position:fixed; z-index:2147483001; left:50%; bottom:96px; display:flex; gap:6px; max-width:calc(100vw - 24px); transform:translateX(-50%); pointer-events:none; }
-    .omt-recommendation-receipt div { min-width:210px; display:grid; grid-template-columns:1fr auto; column-gap:14px; padding:8px 12px 9px; border:1px solid #0004; border-bottom:4px solid #303238; border-radius:7px; color:#111216; background:#f3f4f5f2; box-shadow:0 8px 28px #0008; white-space:nowrap; backdrop-filter:blur(10px); }
-    .omt-recommendation-receipt div.omt-neighbor-result { border-bottom-color:var(--omt-neighbor-click,#ff00a8); }
-    .omt-recommendation-receipt span { grid-column:1 / -1; margin-bottom:2px; color:#5c5e65; font-size:9px; font-weight:750; letter-spacing:.055em; text-transform:uppercase; }
-    .omt-recommendation-receipt strong { color:#111216; font-size:18px; line-height:1.1; font-variant-numeric:tabular-nums; }
-    .omt-recommendation-receipt em { align-self:end; color:#4e5057; font-size:12px; font-style:normal; font-weight:700; font-variant-numeric:tabular-nums; }
+    .omt-recommendation-receipt { position:fixed; z-index:2147483001; left:50%; bottom:100px; display:flex; gap:16px; max-width:calc(100vw - 24px); transform:translateX(-50%); color:#fff; font:700 11px/1.2 Arial,sans-serif; pointer-events:none; }
+    .omt-recommendation-receipt div { display:flex; align-items:baseline; gap:7px; min-width:0; padding:0; border:0; color:#fff; background:transparent; box-shadow:none; white-space:nowrap; backdrop-filter:none; }
+    .omt-recommendation-receipt div::before { content:""; flex:0 0 auto; width:5px; height:5px; border-radius:50%; background:#9290a8; }
+    .omt-recommendation-receipt div.omt-neighbor-result::before { background:var(--omt-neighbor-click,#ff00a8); }
+    .omt-recommendation-receipt span { margin:0; color:#aaa7bd; font-size:9px; font-weight:700; letter-spacing:.045em; text-transform:uppercase; }
+    .omt-recommendation-receipt strong { color:#fff; font-size:14px; line-height:1; font-variant-numeric:tabular-nums; }
+    .omt-recommendation-receipt em { color:#c7c4d4; font-size:11px; font-style:normal; font-weight:700; font-variant-numeric:tabular-nums; }
     @media(max-width:850px) {
       .omt-dock { top:8px; right:8px; max-width:calc(100vw - 16px); }
       .omt-dock button { padding:7px 9px; }
       .omt-drawer { inset:8px 8px 78px; width:auto; min-width:0; }
       .omt-neighborhood,.omt-feedback { grid-template-columns:1fr 1fr; }
+      .omt-recommendation-receipt { bottom:92px; gap:10px; }
+      .omt-recommendation-receipt span { display:none; }
       .omt-views { grid-template-columns:1fr; }
       .omt-view,.omt-view img { height:190px; }
       .omt-board-head p,.omt-board-foot span:nth-child(n+3) { display:none; }
