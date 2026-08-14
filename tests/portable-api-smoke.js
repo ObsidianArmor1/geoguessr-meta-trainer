@@ -64,6 +64,25 @@ async function main() {
         }
       }
     }
+    const guessRow = map.core.panoramas[Math.min(250, entry.panoramas - 1)];
+    const comparison = await api.request(
+      `/api/guess-neighborhood/0?dataset=${encodeURIComponent(entry.datasetKey)}`
+      + `&guess_lat=${guessRow.a}&guess_lng=${guessRow.o}`,
+    );
+    assert.equal(comparison.datasetKey, entry.datasetKey);
+    assert.equal(comparison.anchor.mapIndex, Math.min(250, entry.panoramas - 1));
+    assert.ok(comparison.anchor.distanceFromGuessKm < 0.001);
+    assert.ok(comparison.visualNeighborhood.visualMatches.length >= 8);
+    assert.ok(comparison.overlap.sharedLocations >= 0);
+    assert.ok(comparison.overlap.jaccard >= 0 && comparison.overlap.jaccard <= 1);
+    const origin = map.core.panoramas[0];
+    const identical = await api.request(
+      `/api/guess-neighborhood/0?dataset=${encodeURIComponent(entry.datasetKey)}`
+      + `&guess_lat=${origin.a}&guess_lng=${origin.o}`,
+    );
+    assert.equal(identical.anchor.mapIndex, 0);
+    assert.equal(identical.overlap.jaccard, 1);
+    assert.equal(identical.overlap.sharedLocations, identical.overlap.trueLocations);
   }
   process.stdout.write(`portable smoke passed for ${registry.maps.length} map(s)\n`);
 }

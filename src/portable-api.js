@@ -1313,6 +1313,77 @@
       };
     }
 
+    async guessNeighborhood(map, mapIndex, latitude, longitude) {
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+      const trueNeighborhood = await this.neighborhood(map, mapIndex, false);
+      let selected = { index: -1, distanceKm: Infinity };
+      for (let index = 0; index < map.core.panoramas.length; index += 1) {
+        const row = map.core.panoramas[index];
+        const distanceKm = haversineKm(latitude, longitude, row.a, row.o);
+        if (distanceKm < selected.distanceKm) selected = { index, distanceKm };
+      }
+      if (selected.index < 0) return null;
+      const anchor = map.core.panoramas[selected.index];
+      const { indices, similarities } = await this.neighborRow(map, selected.index);
+      const strongest = similarities[0];
+      const weakest = similarities[similarities.length - 1];
+      const span = Math.max(strongest - weakest, 1e-8);
+      const calibrated = this.calibratedWeights(map, indices, similarities);
+      const visualMatches = Array.from(indices, (neighborIndex, position) => {
+        const row = map.core.panoramas[neighborIndex];
+        return {
+          datasetKey: map.entry.datasetKey,
+          mapIndex: neighborIndex,
+          panoId: row.p,
+          rank: position + 1,
+          latitude: row.a,
+          longitude: row.o,
+          similarity: similarities[position],
+          relativeStrength: clamp((similarities[position] - weakest) / span, 0, 1),
+          posteriorWeight: calibrated.normalized[position],
+          geographicGroup: calibrated.groupIds[position],
+          distanceKm: haversineKm(anchor.a, anchor.o, row.a, row.o),
+        };
+      });
+      const visualNeighborhood = {
+        representation: "raw C-RADIOv4-H exact adaptive core",
+        neighbors: visualMatches.length,
+        coordinateBlind: true,
+        visualMatches,
+      };
+      const trueIndices = new Set(
+        trueNeighborhood.visualMatches.map((match) => match.mapIndex),
+      );
+      const guessIndices = new Set(
+        visualNeighborhood.visualMatches.map((match) => match.mapIndex),
+      );
+      let sharedLocations = 0;
+      for (const index of guessIndices) if (trueIndices.has(index)) sharedLocations += 1;
+      const unionLocations = trueIndices.size + guessIndices.size - sharedLocations;
+      return {
+        datasetKey: map.entry.datasetKey,
+        guess: { latitude, longitude },
+        anchor: {
+          mapIndex: selected.index,
+          panoId: anchor.p,
+          latitude: anchor.a,
+          longitude: anchor.o,
+          distanceFromGuessKm: selected.distanceKm,
+          selection: "nearest stored map panorama to the guess",
+        },
+        overlap: {
+          sharedLocations,
+          trueLocations: trueIndices.size,
+          guessLocations: guessIndices.size,
+          unionLocations,
+          jaccard: sharedLocations / Math.max(unionLocations, 1),
+          trueCoverage: sharedLocations / Math.max(trueIndices.size, 1),
+          guessCoverage: sharedLocations / Math.max(guessIndices.size, 1),
+        },
+        visualNeighborhood,
+      };
+    }
+
     async visualBoardSource(map, mapIndex) {
       const descriptor = map.manifest.visualBoards;
       if (!descriptor) throw new Error("Portable comparison boards are unavailable for this map");
@@ -1400,6 +1471,17 @@
       if (neighborhoodMatch) {
         const map = await this.loadMap(datasetHint);
         return this.neighborhood(map, Number(neighborhoodMatch[1]), true);
+      }
+      const guessNeighborhoodMatch = url.pathname.match(/^\/api\/guess-neighborhood\/(\d+)$/);
+      if (guessNeighborhoodMatch) {
+        const map = await this.loadMap(datasetHint);
+        const latitude = Number(url.searchParams.get("guess_lat"));
+        const longitude = Number(url.searchParams.get("guess_lng"));
+        const comparison = await this.guessNeighborhood(
+          map, Number(guessNeighborhoodMatch[1]), latitude, longitude,
+        );
+        if (!comparison) throw new Error("A valid player guess is required");
+        return comparison;
       }
       const boardMatch = url.pathname.match(/^\/api\/visual-board\/(\d+)$/);
       if (boardMatch) {
