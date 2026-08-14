@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.5
+// @version      2.0.0-beta.6
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.5";
+  const USERSCRIPT_VERSION = "2.0.0-beta.6";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -769,7 +769,7 @@
     if (state.showVisualNeighbors) {
       const outcome = realizedRecommendation(neighborhood.weightedClick, neighborhood);
       if (outcome) {
-        receipts.push(`<div class="omt-neighbor-result"><span>Top 100 recommendation</span><strong>${Math.round(outcome.score).toLocaleString()} pts</strong><em>${formatOutcomeDistance(outcome.distanceKm)}</em></div>`);
+        receipts.push(`<div class="omt-neighbor-result"><span>Visual recommendation</span><strong>${Math.round(outcome.score).toLocaleString()} pts</strong><em>${formatOutcomeDistance(outcome.distanceKm)}</em></div>`);
       }
     }
     return receipts.length
@@ -779,7 +779,7 @@
 
   function mapModeLabel() {
     if (state.showBestMeta && state.showVisualNeighbors) return "Both";
-    if (state.showVisualNeighbors) return "100 similar";
+    if (state.showVisualNeighbors) return "Similar";
     return "Family map";
   }
 
@@ -894,7 +894,7 @@
       const result = outcome
         ? `<div class="omt-result-row"><div><b>${Math.round(outcome.score).toLocaleString()}</b><span>points from the similar-view click</span></div><div><b>${formatOutcomeDistance(outcome.distanceKm)}</b><span>from the revealed location</span></div></div>`
         : "";
-      return `<section class="omt-section"><div class="omt-section-head"><h3>100 similar panoramas</h3><span>location ignored while matching</span></div>${result}<div class="omt-neighborhood">${radiusHtml}</div><p class="omt-note">Median match distance: ${neighborhood.medianDistanceKm.toFixed(1)} km. Closest tenth: ${neighborhood.nearestTenthDistanceKm.toFixed(1)} km. ${esc(densityNote)}</p></section>`;
+      return `<section class="omt-section"><div class="omt-section-head"><h3>${neighborhood.neighbors.toLocaleString()} similar panoramas</h3><span>adaptive visual cutoff · location ignored</span></div>${result}<div class="omt-neighborhood">${radiusHtml}</div><p class="omt-note">Median match distance: ${neighborhood.medianDistanceKm.toFixed(1)} km. Closest tenth: ${neighborhood.nearestTenthDistanceKm.toFixed(1)} km. ${esc(densityNote)}</p></section>`;
     })() : "";
     state.shadow.innerHTML = `
       <style>${styles}</style><div class="omt">
@@ -903,7 +903,7 @@
           <div class="omt-toolbar"><button class="omt-compare-button" id="omt-compare">Compare views <kbd>V</kbd></button><button id="omt-mode-cycle">${mapModeLabel()} <kbd>M</kbd></button><button class="omt-fit" id="omt-fit">Fit map</button></div>
           <div class="omt-scroll">
             ${neighborhoodHtml}
-            <section class="omt-section"><div class="omt-section-head"><h3>Map overlays</h3><span>saved between rounds</span></div><div class="omt-map-actions"><label class="omt-layer-toggle"><input type="checkbox" id="omt-best-meta" ${state.showBestMeta ? "checked" : ""}>Families</label><label class="omt-layer-toggle"><input type="checkbox" id="omt-neighbors" ${state.showVisualNeighbors ? "checked" : ""}>100 similar</label><label class="omt-color-setting">Dots <input type="color" id="omt-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-click-color" value="${state.neighborClickColor}"></label></div><div class="omt-click-lines">${clickLines || ""}</div></section>
+            <section class="omt-section"><div class="omt-section-head"><h3>Map overlays</h3><span>saved between rounds</span></div><div class="omt-map-actions"><label class="omt-layer-toggle"><input type="checkbox" id="omt-best-meta" ${state.showBestMeta ? "checked" : ""}>Families</label><label class="omt-layer-toggle"><input type="checkbox" id="omt-neighbors" ${state.showVisualNeighbors ? "checked" : ""}>Similar</label><label class="omt-color-setting">Dots <input type="color" id="omt-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-click-color" value="${state.neighborClickColor}"></label></div><div class="omt-click-lines">${clickLines || ""}</div></section>
             <section class="omt-section"><div class="omt-section-head"><h3>Matched families</h3><span>${metas.length} shown${review.moreMetas?.length ? ` · ${review.moreMetas.length} more` : ""}</span></div><nav class="omt-nav"><button id="omt-prev" ${state.active === 0 ? "disabled" : ""}>←</button><select id="omt-select" aria-label="Active family">${optionHtml}</select><button id="omt-next" ${state.active === metas.length - 1 ? "disabled" : ""}>→</button></nav>${review.moreMetas?.length ? `<button class="omt-more" id="omt-more">Add next family (${review.moreMetas.length} remaining)</button>` : ""}<div class="omt-family-head"><div><h2>${esc(familyDisplayTitle(meta))}</h2><p>${agreement}</p></div><span class="omt-strength">${esc(strengthLabel)}</span></div><div class="omt-metrics"><div class="omt-metric"><b>${(meta.bits || 0).toFixed(2)}</b><span>location bits</span></div><div class="omt-metric"><b>${meta.members.toLocaleString()}</b><span>family locations</span></div><div class="omt-metric"><b>${Number.isFinite(meta.repeatability) ? `${Math.round(meta.repeatability * 100)}%` : "—"}</b><span>replicated</span></div></div>${usefulFamilyDescription(meta) ? `<p class="omt-description">${esc(usefulFamilyDescription(meta))}</p>` : ""}${filtered ? `<details class="omt-system-details"><summary>Filtering details</summary>${esc(filtered)}</details>` : ""}</section>
             <section class="omt-section"><div class="omt-section-head"><h3>This round</h3><span>${viewEvidence ? "family evidence by direction" : "four stored directions"}</span></div><div class="omt-views">${viewHtml}</div></section>
             <section class="omt-section"><div class="omt-section-head"><h3>Family examples</h3><span>this round + eight representative views</span></div><button class="omt-evidence" data-image="${esc(representativeViews)}" data-label="${esc(familyDisplayTitle(meta))} · representative views"><img data-src="${esc(representativeViews)}" alt="Representative views for ${esc(familyDisplayTitle(meta))}"></button><p class="omt-note">${esc(evidenceNote)}</p></section>
@@ -1440,7 +1440,7 @@
           : `${item.distanceFromGuessKm.toFixed(1)} km`;
         const rank = Number.isFinite(item.globalPanoRank)
           ? `global pano match #${item.globalPanoRank}`
-          : "outside the global Top 100";
+          : "outside the adaptive visual set";
         const label = `Best visual case near your guess · heading ${item.heading}°`;
         const detail = `${Number(item.viewSimilarity).toFixed(3)} view similarity · ${distance} from guess · ${rank}`;
         return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" title="Shift + hover to enlarge · click to open in Google Maps"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess · ${item.heading}°</span><em>${esc(detail)}</em></button>`;
@@ -1455,8 +1455,8 @@
     const interpretation = literal
       ? "Eight closest views, without filtering for agreement."
       : mode.id === "alternate"
-        ? "Another shared look among the 100 similar panoramas."
-        : "Most consistent shared look among the 100 similar panoramas.";
+        ? "Another shared look among the nearest visual candidates."
+        : "Most consistent shared look among the nearest visual candidates.";
     const element = document.createElement("div");
     element.className = "omt-visual-board";
     const guessReceipt = mode.guessMatch
@@ -2451,8 +2451,8 @@
         map,
         position: { lat: neighborClick.latitude, lng: neighborClick.longitude },
         icon: icons.neighborsIdeal,
-        title: `Calibrated Top 100 click · ${Math.round(neighborClick.expectedScore).toLocaleString()} expected points`,
-        // Keep every Top-100 dot hoverable when the recommendation lands on it.
+        title: `Adaptive visual click · ${Math.round(neighborClick.expectedScore).toLocaleString()} expected points`,
+        // Keep every visual-match dot hoverable when the recommendation lands on it.
         clickable: false,
         zIndex: 1001,
       });
@@ -2519,7 +2519,7 @@
   }
 
   async function applyStoredMapMode(token) {
-    // In 100-closest or Both mode, the review already contains the coordinates
+    // In Similar or Both mode, the review already contains the coordinates
     // needed for the red dots. Paint them before awaiting any meta click work.
     if (state.showVisualNeighbors) showMetaOnMap(false);
     try {

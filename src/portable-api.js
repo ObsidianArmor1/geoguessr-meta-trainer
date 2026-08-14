@@ -328,28 +328,49 @@
           buffer = await gunzip(buffer);
           const view = new DataView(buffer);
           const magic = textDecoder.decode(new Uint8Array(buffer, 0, 8));
-          if (magic !== "OMTNBR01" || view.getUint32(8, true) !== 1) {
+          const version = view.getUint32(8, true);
+          if (!((magic === "OMTNBR01" && version === 1)
+              || (magic === "OMTNBR02" && version === 2))) {
             throw new Error("Unsupported portable neighbor chunk");
           }
           const start = view.getUint32(12, true);
           const rows = view.getUint32(16, true);
-          const neighbors = view.getUint32(20, true);
-          const indexOffset = 24;
-          const similarityOffset = indexOffset + rows * neighbors * 4;
-          return { buffer, view, start, rows, neighbors, indexOffset, similarityOffset };
+          const count = view.getUint32(20, true);
+          if (version === 1) {
+            const indexOffset = 24;
+            const similarityOffset = indexOffset + rows * count * 4;
+            return {
+              buffer, view, version, start, rows, neighbors: count,
+              indexOffset, similarityOffset,
+            };
+          }
+          const offsetsOffset = 24;
+          const indexOffset = offsetsOffset + (rows + 1) * 4;
+          const similarityOffset = indexOffset + count * 4;
+          return {
+            buffer, view, version, start, rows, edges: count,
+            offsetsOffset, indexOffset, similarityOffset,
+          };
         })());
       }
       const loaded = await this.chunkPromises.get(key);
       const local = mapIndex - loaded.start;
-      const indices = new Int32Array(loaded.neighbors);
-      const similarities = new Float64Array(loaded.neighbors);
-      for (let index = 0; index < loaded.neighbors; index += 1) {
+      const rowStart = loaded.version === 1
+        ? local * loaded.neighbors
+        : loaded.view.getUint32(loaded.offsetsOffset + local * 4, true);
+      const rowStop = loaded.version === 1
+        ? rowStart + loaded.neighbors
+        : loaded.view.getUint32(loaded.offsetsOffset + (local + 1) * 4, true);
+      const neighbors = rowStop - rowStart;
+      const indices = new Int32Array(neighbors);
+      const similarities = new Float64Array(neighbors);
+      for (let index = 0; index < neighbors; index += 1) {
         indices[index] = loaded.view.getInt32(
-          loaded.indexOffset + (local * loaded.neighbors + index) * 4,
+          loaded.indexOffset + (rowStart + index) * 4,
           true,
         );
         similarities[index] = halfToFloat(loaded.view.getUint16(
-          loaded.similarityOffset + (local * loaded.neighbors + index) * 2,
+          loaded.similarityOffset + (rowStart + index) * 2,
           true,
         ));
       }
@@ -993,13 +1014,15 @@
         distances,
         current,
         candidates,
-        top100: new Map(neighborhood.visualMatches.map((match) => [match.mapIndex, match.rank])),
+        neighborhoodRanks: new Map(
+          neighborhood.visualMatches.map((match) => [match.mapIndex, match.rank]),
+        ),
       };
     }
 
     guessLocalMatch(context, currentSlot) {
       if (!context) return null;
-      const { map, pool, distances, current, candidates, top100 } = context;
+      const { map, pool, distances, current, candidates, neighborhoodRanks } = context;
       const dimensions = map.manifest.viewProjection.dimensions;
       const currentOffset = currentSlot * dimensions;
       let bestPosition = 0;
@@ -1034,7 +1057,7 @@
         distanceFromGuessKm: distances[candidate],
         candidatePool: pool.length,
         poolRadiusKm: distances[pool[pool.length - 1]],
-        globalPanoRank: top100.get(candidate) || null,
+        globalPanoRank: neighborhoodRanks.get(candidate) || null,
         approximateProjection: true,
       };
     }
