@@ -38,11 +38,19 @@ async function main() {
       assert.ok(Number.isFinite(recommendation.weightedClick.expectedScore));
       if (map.manifest.visualBoards) {
         const board = await api.request(
-          `/api/visual-board/${mapIndex}?dataset=${encodeURIComponent(entry.datasetKey)}`,
+          `/api/visual-board/${mapIndex}?dataset=${encodeURIComponent(entry.datasetKey)}&guess_lat=${row.a}&guess_lng=${row.o}`,
         );
         assert.equal(board.mapIndex, mapIndex);
         assert.ok(board.modes.length >= 1);
-        assert.ok(board.modes.every((mode) => mode.entries.length === 8));
+        if (map.manifest.viewProjection) {
+          assert.ok(board.modes.every((mode) => mode.guessMatch));
+          assert.ok(board.modes.every((mode) => mode.entries.length === 7));
+          assert.ok(board.modes.every((mode) => mode.guessMatch.view.startsWith(
+            "https://streetviewpixels-pa.googleapis.com/v1/thumbnail?",
+          )));
+        } else {
+          assert.ok(board.modes.every((mode) => mode.entries.length === 8));
+        }
       }
     }
   }

@@ -2,8 +2,8 @@
 
 Post-round visual study for these custom maps:
 
-- Balanced World 50k
-- Balanced USA 50k
+- [Balanced World 50k](https://www.geoguessr.com/maps/6a7d99296a64847f955da936)
+- [Balanced USA 50k](https://www.geoguessr.com/maps/6a7d9951e250d15ffed33065)
 
 ## Install
 
