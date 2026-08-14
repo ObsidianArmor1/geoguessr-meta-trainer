@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.6
+// @version      2.0.0-beta.7
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.6";
+  const USERSCRIPT_VERSION = "2.0.0-beta.7";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -241,7 +241,7 @@
     if (!datasetKey) return;
     // The 50k-location core is the largest cold-start cost. Begin downloading
     // and parsing it when play starts instead of after the guess is submitted.
-    portableApi.loadMap(datasetKey).catch(() => {
+    portableApi.prewarmMap(datasetKey).catch(() => {
       // Unsupported maps are normal; the trainer remains dormant on them.
     });
   }
@@ -875,7 +875,7 @@
         ? `<div><strong>Family click</strong><span>${expected.a.toFixed(5)}, ${expected.o.toFixed(5)}</span><span>${Math.round(expected.e).toLocaleString()} average points within this family</span></div>`
         : "",
       state.showVisualNeighbors && neighborClick
-        ? `<div><strong>Similar-view click</strong><span>${neighborClick.latitude.toFixed(5)}, ${neighborClick.longitude.toFixed(5)}</span><span>${Math.round(neighborClick.expectedScore).toLocaleString()} expected points from ${neighborClick.effectiveGeographicGroups.toFixed(1)} independent areas</span></div>`
+        ? `<div><strong>Similar-view click</strong><span>${neighborClick.latitude.toFixed(5)}, ${neighborClick.longitude.toFixed(5)}</span><span>${Math.round(neighborClick.expectedScore).toLocaleString()} expected points from the exact core + full visual distribution</span></div>`
         : "",
     ].filter(Boolean).join("");
     const neighborhoodHtml = neighborhood ? (() => {
@@ -894,7 +894,14 @@
       const result = outcome
         ? `<div class="omt-result-row"><div><b>${Math.round(outcome.score).toLocaleString()}</b><span>points from the similar-view click</span></div><div><b>${formatOutcomeDistance(outcome.distanceKm)}</b><span>from the revealed location</span></div></div>`
         : "";
-      return `<section class="omt-section"><div class="omt-section-head"><h3>${neighborhood.neighbors.toLocaleString()} similar panoramas</h3><span>adaptive visual cutoff · location ignored</span></div>${result}<div class="omt-neighborhood">${radiusHtml}</div><p class="omt-note">Median match distance: ${neighborhood.medianDistanceKm.toFixed(1)} km. Closest tenth: ${neighborhood.nearestTenthDistanceKm.toFixed(1)} km. ${esc(densityNote)}</p></section>`;
+      const posterior = neighborhood.posterior;
+      const posteriorLabel = posterior
+        ? `${Math.round(posterior.displayedMass * 100)}% of visual weight${posterior.displayCapped ? " · 10% dot cap" : ""}`
+        : "adaptive visual cutoff · location ignored";
+      const posteriorNote = posterior
+        ? `The click uses all ${posterior.mapLocations.toLocaleString()} map locations; the map shows the strongest ${neighborhood.neighbors.toLocaleString()} for readability. Effective visual support: ${Math.round(posterior.effectiveLocations).toLocaleString()} locations.`
+        : "";
+      return `<section class="omt-section"><div class="omt-section-head"><h3>${neighborhood.neighbors.toLocaleString()} similar panoramas shown</h3><span>${esc(posteriorLabel)}</span></div>${result}<div class="omt-neighborhood">${radiusHtml}</div><p class="omt-note">${esc(posteriorNote)} Median shown-match distance: ${neighborhood.medianDistanceKm.toFixed(1)} km. Closest tenth: ${neighborhood.nearestTenthDistanceKm.toFixed(1)} km. ${esc(densityNote)}</p></section>`;
     })() : "";
     state.shadow.innerHTML = `
       <style>${styles}</style><div class="omt">
@@ -2004,7 +2011,7 @@
         this.canvas = null;
         this.frame = 0;
         this.hitLayer = null;
-        this.hitButtons = new Map();
+        this.neighborHitPool = [];
         this.familyHitPool = [];
         this.currentHitButton = null;
         this.setMap(map);
@@ -2023,11 +2030,10 @@
           this.hitLayer.style.position = "absolute";
           this.hitLayer.style.zIndex = "11";
           this.hitLayer.style.pointerEvents = "none";
-          for (const point of this.points) {
+          const interactivePoints = Math.min(1_000, this.points.length);
+          for (let index = 0; index < interactivePoints; index += 1) {
             const button = document.createElement("button");
             button.type = "button";
-            button.title = `Visual match #${point.rank} — preview; click to open Street View`;
-            button.setAttribute("aria-label", button.title);
             button.style.position = "absolute";
             button.style.display = "none";
             button.style.padding = "0";
@@ -2036,15 +2042,19 @@
             button.style.background = "transparent";
             button.style.cursor = "pointer";
             button.style.pointerEvents = "auto";
-            button.addEventListener("pointerenter", (event) => queueMatchTooltip(point, event.clientX, event.clientY, event.shiftKey));
-            button.addEventListener("pointermove", (event) => queueMatchTooltip(point, event.clientX, event.clientY, event.shiftKey));
+            button.addEventListener("pointerenter", (event) => {
+              if (button.omtPoint) queueMatchTooltip(button.omtPoint, event.clientX, event.clientY, event.shiftKey);
+            });
+            button.addEventListener("pointermove", (event) => {
+              if (button.omtPoint) queueMatchTooltip(button.omtPoint, event.clientX, event.clientY, event.shiftKey);
+            });
             button.addEventListener("pointerleave", hideMatchTooltip);
             button.addEventListener("click", (event) => {
               event.preventDefault();
               event.stopPropagation();
-              openMatchInGoogleMaps(point);
+              if (button.omtPoint) openMatchInGoogleMaps(button.omtPoint);
             });
-            this.hitButtons.set(point.rank, button);
+            this.neighborHitPool.push(button);
             this.hitLayer.appendChild(button);
           }
           if (this.current) {
@@ -2141,7 +2151,10 @@
           this.hitLayer.style.top = `${top}px`;
           this.hitLayer.style.width = `${width}px`;
           this.hitLayer.style.height = `${height}px`;
-          for (const button of this.hitButtons.values()) button.style.display = "none";
+          for (const button of this.neighborHitPool) {
+            button.style.display = "none";
+            button.omtPoint = null;
+          }
           for (const button of this.familyHitPool) {
             button.style.display = "none";
             button.omtPoint = null;
@@ -2177,6 +2190,7 @@
         let visible = 0;
         if (this.mode === "neighbors") {
           const rankedPoints = [...this.points].sort((a, b) => (b.rank || 0) - (a.rank || 0));
+          const visibleHitTargets = [];
           for (const point of rankedPoints) {
             const pixel = viewportPoint(point);
             if (pixel.x < -18 || pixel.x > width + 18 || pixel.y < -18 || pixel.y > height + 18) continue;
@@ -2210,14 +2224,25 @@
               context.fillText(String(point.rank), x, y + 0.3);
             }
             const hitRadius = Math.max(9, pointRadius + 4);
-            const hitButton = this.hitButtons.get(point.rank);
-            if (hitButton) {
-              hitButton.style.display = "block";
-              hitButton.style.left = `${x - hitRadius}px`;
-              hitButton.style.top = `${y - hitRadius}px`;
-              hitButton.style.width = `${hitRadius * 2}px`;
-              hitButton.style.height = `${hitRadius * 2}px`;
+            visibleHitTargets.push({ point, x, y, hitRadius });
+          }
+          visibleHitTargets.sort((left, right) => left.point.rank - right.point.rank);
+          for (let index = 0; index < this.neighborHitPool.length; index += 1) {
+            const button = this.neighborHitPool[index];
+            const target = visibleHitTargets[index];
+            if (!target) {
+              button.style.display = "none";
+              button.omtPoint = null;
+              continue;
             }
+            button.omtPoint = target.point;
+            button.title = `Visual match #${target.point.rank} — preview; click to open Street View`;
+            button.setAttribute("aria-label", button.title);
+            button.style.display = "block";
+            button.style.left = `${target.x - target.hitRadius}px`;
+            button.style.top = `${target.y - target.hitRadius}px`;
+            button.style.width = `${target.hitRadius * 2}px`;
+            button.style.height = `${target.hitRadius * 2}px`;
           }
           if (this.current) {
             const pixel = viewportPoint({
@@ -2283,7 +2308,7 @@
         }
         this.hitLayer?.remove();
         this.hitLayer = null;
-        this.hitButtons.clear();
+        this.neighborHitPool = [];
         this.familyHitPool = [];
         this.currentHitButton = null;
         this.canvas?.remove();
