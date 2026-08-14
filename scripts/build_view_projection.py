@@ -95,11 +95,13 @@ def build(manifest_path: Path, output: Path, dimensions: int, chunk_panoramas: i
         global_views += len(quantized)
         filename = f"{chunk_index:05d}.bin.gz"
         path = output / filename
+        temporary = path.with_suffix(path.suffix + ".tmp")
         header = struct.pack("<8sIIII", MAGIC, VERSION, len(map_indices), 4, dimensions)
         body = header + np.asarray(map_indices, dtype="<i4").tobytes() + quantized.tobytes()
-        with path.open("wb") as raw:
+        with temporary.open("wb") as raw:
             with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6, mtime=0) as stream:
                 stream.write(body)
+        temporary.replace(path)
         chunks.append({
             "file": filename,
             "panoramas": len(map_indices),
@@ -121,7 +123,10 @@ def build(manifest_path: Path, output: Path, dimensions: int, chunk_panoramas: i
         "globalMean": (global_sum / max(global_views, 1)).tolist(),
         "chunks": chunks,
     }
-    (output / "manifest.json").write_text(json.dumps(payload, separators=(",", ":")))
+    manifest_path = output / "manifest.json"
+    temporary_manifest = manifest_path.with_suffix(".json.tmp")
+    temporary_manifest.write_text(json.dumps(payload, separators=(",", ":")))
+    temporary_manifest.replace(manifest_path)
 
 
 def main() -> None:
