@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.4
+// @version      2.0.0-beta.5
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.4";
+  const USERSCRIPT_VERSION = "2.0.0-beta.5";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -152,7 +152,7 @@
         if (stored.showBestMeta || stored.showVisualNeighbors) return stored;
       }
     } catch (_error) {}
-    return { showBestMeta: true, showVisualNeighbors: false };
+    return { showBestMeta: false, showVisualNeighbors: true };
   }
 
   function saveMapLayerPreferences() {
