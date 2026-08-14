@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.15
-// @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
+// @version      2.0.0-beta.16
+// @description  Post-round visual similarity learning for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.15";
+  const USERSCRIPT_VERSION = "2.0.0-beta.16";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -109,7 +109,9 @@
     overlays: [],
     originalMapView: null,
     pinIcons: null,
-    showBestMeta: mapLayerPreferences.showBestMeta,
+    // Clustering-family review is preserved at the family-meta-trainer-v1 Git
+    // tag. The active trainer is deliberately similarity-only.
+    showBestMeta: false,
     showVisualNeighbors: mapLayerPreferences.showVisualNeighbors,
     showGuessNeighbors: mapLayerPreferences.showGuessNeighbors,
     neighborDotColor: mapColorPreferences.neighborDots,
@@ -156,9 +158,16 @@
   function readMapLayerPreferences() {
     try {
       const stored = JSON.parse(localStorage.getItem(MAP_LAYER_STORAGE_KEY) || "null");
-      if (stored && typeof stored.showBestMeta === "boolean" && typeof stored.showVisualNeighbors === "boolean") {
-        stored.showGuessNeighbors = stored.showGuessNeighbors === true;
-        if (stored.showBestMeta || stored.showVisualNeighbors) return stored;
+      if (stored && typeof stored.showVisualNeighbors === "boolean") {
+        return {
+          showBestMeta: false,
+          // In the old three-mode control, `false` meant family-only rather
+          // than an intentionally clear map. Migrate that state to Similar.
+          showVisualNeighbors: stored.similarityOnly === true
+            ? stored.showVisualNeighbors
+            : true,
+          showGuessNeighbors: stored.showGuessNeighbors === true,
+        };
       }
     } catch (_error) {}
     return { showBestMeta: false, showVisualNeighbors: true, showGuessNeighbors: false };
@@ -166,9 +175,10 @@
 
   function saveMapLayerPreferences() {
     localStorage.setItem(MAP_LAYER_STORAGE_KEY, JSON.stringify({
-      showBestMeta: state.showBestMeta,
+      showBestMeta: false,
       showVisualNeighbors: state.showVisualNeighbors,
       showGuessNeighbors: state.showGuessNeighbors,
+      similarityOnly: true,
     }));
   }
 
@@ -235,12 +245,12 @@
     return `#${meta.globalMatchRank.toLocaleString()} visual match map-wide`;
   }
 
-  function mapLegend(meta, fallback, neighborhood) {
+  function mapLegend(neighborhood) {
     const guess = state.showVisualNeighbors && state.showGuessNeighbors
       ? state.guessNeighborhood
       : null;
     const overlap = guess?.overlap;
-    return `<div class="omt-legend">${state.showBestMeta ? `<i class="omt-legend-dot"></i> family (${meta.members.toLocaleString()}) <i class="omt-legend-pin"></i> family click` : ""}${state.showVisualNeighbors && neighborhood?.visualMatches?.length ? `<i class="omt-legend-match omt-legend-round-match"></i> round matches · size = similarity <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click` : ""}${guess ? `<i class="omt-legend-match omt-legend-guess-match"></i> guess matches <i class="omt-legend-match omt-legend-shared-match"></i> shared${overlap ? ` (${overlap.sharedLocations})` : ""}` : ""}<i class="omt-legend-current"></i> round</div>`;
+    return `<div class="omt-legend">${state.showVisualNeighbors && neighborhood?.visualMatches?.length ? `<i class="omt-legend-match omt-legend-round-match"></i> round matches · size = similarity <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click` : ""}${guess ? `<i class="omt-legend-match omt-legend-guess-match"></i> guess matches <i class="omt-legend-match omt-legend-shared-match"></i> shared${overlap ? ` (${overlap.sharedLocations})` : ""}` : ""}<i class="omt-legend-current"></i> round</div>`;
   }
 
   function request(path, options = {}) {
@@ -293,7 +303,7 @@
     if (panoId) params.set("pano_id", panoId);
     if (Number.isFinite(latitude)) params.set("lat", latitude);
     if (Number.isFinite(longitude)) params.set("lng", longitude);
-    request(`/api/review?${params}`).then(async (review) => {
+    request(`/api/neighborhood?${params}`).then(async (review) => {
       if (!review?.matched) return;
       const dataset = encodeURIComponent(review.datasetKey);
       const mapIndex = review.location.mapIndex;
@@ -771,18 +781,11 @@
     };
   }
 
-  function recommendationReceipt(meta = null) {
+  function recommendationReceipt() {
     const review = state.review;
     const neighborhood = review?.visualNeighborhood;
     if (!review || !neighborhood) return "";
     const receipts = [];
-    if (state.showBestMeta && meta) {
-      const metaClick = (meta.click || state.detail.get(meta.id)?.click)?.s?.expected;
-      const outcome = realizedRecommendation(metaClick, neighborhood);
-      if (outcome) {
-        receipts.push(`<div class="omt-family-result"><span>Family click</span><strong>${Math.round(outcome.score).toLocaleString()} pts</strong><em>${formatOutcomeDistance(outcome.distanceKm)}</em></div>`);
-      }
-    }
     if (state.showVisualNeighbors) {
       const outcome = realizedRecommendation(neighborhood.weightedClick, neighborhood);
       if (outcome) {
@@ -795,9 +798,8 @@
   }
 
   function mapModeLabel() {
-    if (state.showBestMeta && state.showVisualNeighbors) return "Both";
     if (state.showVisualNeighbors) return "Similar";
-    return "Family map";
+    return "Map clear";
   }
 
   function familyDisplayTitle(meta) {
@@ -814,21 +816,17 @@
     return description;
   }
 
-  function trainerDock(review, metas) {
+  function trainerDock(review) {
     const compare = review.visualNeighborhood
       ? `<button class="omt-dock-primary" id="omt-compare-launch">Compare views <kbd>V</kbd></button>`
       : "";
     const mode = review.visualNeighborhood
-      ? `<button id="omt-mode-cycle" title="Cycle map overlays">${mapModeLabel()} <kbd>M</kbd></button>`
+      ? `<button id="omt-mode-cycle" title="Toggle similarity map">${mapModeLabel()} <kbd>M</kbd></button>`
       : "";
-    const details = metas.length
-      ? `<button id="omt-launch">Details <span class="omt-dock-count">${metas.length}</span></button>`
-      : "";
-    return `<div class="omt-dock">${compare}${mode}${details}</div>`;
+    return `<div class="omt-dock">${compare}${mode}</div>`;
   }
 
   function bindDockUi() {
-    state.shadow.getElementById("omt-launch")?.addEventListener("click", openDrawer);
     state.shadow.getElementById("omt-compare-launch")?.addEventListener("click", openVisualBoard);
     state.shadow.getElementById("omt-mode-cycle")?.addEventListener("click", cycleMapLayers);
   }
@@ -837,6 +835,12 @@
     ensureRoot();
     const review = state.review;
     if (!review) return;
+    // The active trainer has one focused learning loop: similarity evidence.
+    // Family review remains recoverable from family-meta-trainer-v1.
+    state.shadow.innerHTML = `<style>${styles}</style><div class="omt">${trainerDock(review)}${state.overlays.length ? mapLegend(review.visualNeighborhood) : ""}${recommendationReceipt()}</div>`;
+    bindDockUi();
+    if (state.visualBoardOpen) queueMicrotask(renderVisualBoard);
+    return;
     const metas = review.metas || [];
     if (!metas.length) {
       state.shadow.innerHTML = `<style>${styles}</style><div class="omt">${trainerDock(review, metas)}${recommendationReceipt()}</div>`;
@@ -1028,37 +1032,21 @@
   }
 
   function setMapLayer(layer, enabled) {
-    const nextBestMeta = layer === "meta" ? enabled : state.showBestMeta;
-    const nextVisualNeighbors = layer === "neighbors" ? enabled : state.showVisualNeighbors;
-    if (!nextBestMeta && !nextVisualNeighbors) {
-      render();
-      return;
-    }
-    setMapLayerMode(nextBestMeta, nextVisualNeighbors);
+    if (layer !== "neighbors") return;
+    setMapLayerMode(enabled);
   }
 
-  function setMapLayerMode(showBestMeta, showVisualNeighbors) {
-    state.showBestMeta = showBestMeta;
+  function setMapLayerMode(showVisualNeighbors) {
+    state.showBestMeta = false;
     state.showVisualNeighbors = showVisualNeighbors;
     saveMapLayerPreferences();
     render();
-    const ready = state.showBestMeta ? loadActiveDetail() : Promise.resolve();
-    ready.then(() => {
-      showMetaOnMap(false);
-      if (!state.drawerOpen) render();
-    }).catch((error) => {
-      console.error("Meta Trainer: could not update map layer", error);
-    });
+    showMetaOnMap(false);
+    if (!state.drawerOpen) render();
   }
 
   function cycleMapLayers() {
-    if (state.showBestMeta && !state.showVisualNeighbors) {
-      setMapLayerMode(false, true);
-    } else if (!state.showBestMeta && state.showVisualNeighbors) {
-      setMapLayerMode(true, true);
-    } else {
-      setMapLayerMode(true, false);
-    }
+    setMapLayerMode(!state.showVisualNeighbors);
   }
 
   function handleLayerHotkeys(event) {
@@ -2664,15 +2652,9 @@
   }
 
   async function applyStoredMapMode(token) {
-    // In Similar or Both mode, the review already contains the coordinates
-    // needed for the red dots. Paint them before awaiting any meta click work.
+    // The neighborhood response already contains everything needed to paint
+    // similarity evidence; there is no family-detail request in this build.
     if (state.showVisualNeighbors) showMetaOnMap(false);
-    try {
-      if (state.showBestMeta) await loadActiveDetail();
-    } catch (error) {
-      console.error("Meta Trainer: could not load saved map mode", error);
-      return;
-    }
     // GeoGuessr may emit round_end just before its result map finishes mounting.
     // Retry briefly so the persisted mode appears without opening the drawer.
     for (let attempt = 0; attempt < 24 && token === state.requestToken; attempt += 1) {
@@ -3088,31 +3070,17 @@
     if (Number.isFinite(round.location.lat)) params.set("lat", round.location.lat);
     if (Number.isFinite(round.location.lng)) params.set("lng", round.location.lng);
     if (datasetKey) params.set("map_key", datasetKey);
-    // Retry the two latency-critical payloads quietly at 100 ms and 200 ms
-    // before displaying a transient data-download failure.
-    const reviewRequest = criticalRequest(`/api/review?${params}`);
-    if (state.showVisualNeighbors) {
-      criticalRequest(`/api/neighborhood?${params}`).then((neighborhood) => {
-        if (token !== state.requestToken || !neighborhood.matched) return;
-        state.fastNeighborhood = neighborhood;
-        applyFastNeighborhood(token);
-      }).catch((error) => {
-        console.error("Meta Trainer: could not load fast neighbor dots", error);
-      });
-    }
+    // Retry the latency-critical similarity payload quietly at 100 ms and
+    // 200 ms before displaying a transient data-download failure.
+    const reviewRequest = criticalRequest(`/api/neighborhood?${params}`);
     try {
       const review = await reviewRequest;
       if (token !== state.requestToken) return;
       if (!review.matched) return;
-      if (state.fastNeighborhood?.visualNeighborhood) {
-        review.visualNeighborhood = state.fastNeighborhood.visualNeighborhood;
-      }
       state.review = review;
       state.roundIdentity = buildRoundIdentity(eventState, round, review);
       state.fastNeighborhood = null;
       clearTimeout(state.offlineRetryTimer);
-      state.active = 0;
-      state.detail.clear();
       state.drawerOpen = false;
       render();
       if (state.showGuessNeighbors) loadGuessNeighborhood(token);
