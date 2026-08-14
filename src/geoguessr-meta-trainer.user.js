@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.16
+// @version      2.0.0-beta.17
 // @description  Post-round visual similarity learning for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.16";
+  const USERSCRIPT_VERSION = "2.0.0-beta.17";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -541,7 +541,7 @@
     button.omt-board-match { padding:0; cursor:pointer; }
     .omt-board-match em { position:absolute; right:0; bottom:0; padding:4px 7px; color:#d8e1da; background:#07100bdc; font:normal 10px/1.2 Arial,sans-serif; }
     .omt-board-peek { position:fixed; z-index:4; inset:62px 2vw 40px; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; border:1px solid #c8ff7075; border-radius:8px; background:#020402f8; box-shadow:0 18px 80px #000e; pointer-events:none; }
-    .omt-board-peek img { display:block; width:100%; min-height:0; flex:1; object-fit:contain; }
+    .omt-board-peek img { display:block; width:100%; min-height:0; flex:1; object-fit:cover; }
     .omt-board-peek div { flex:none; display:flex; justify-content:space-between; gap:20px; padding:8px 11px; color:#fff; background:#0d1711; font-size:12px; }
     .omt-board-peek span { color:#aebbb2; }
     .omt-board-foot { flex:none; display:flex; align-items:center; gap:18px; min-height:42px; padding:7px 16px; border-top:1px solid #ffffff24; color:#bdc8bf; background:#0d1711; font-size:11px; }
@@ -691,8 +691,8 @@
     .omt-board-match em { position:absolute; right:0; bottom:0; padding:3px 5px; color:#d5d7db; background:#090a0cdd; font:normal 9px/1.2 inherit; }
     .omt-board-peek { position:fixed; z-index:4; inset:62px 2vw 40px; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; border:1px solid #ffffff4a; border-radius:5px; background:#060709fa; box-shadow:0 20px 80px #000f; pointer-events:none; }
     .omt-board-peek-media { position:relative; min-height:0; flex:1; overflow:hidden; background:#050607; }
-    .omt-board-peek-media > img { display:block; width:100%; height:100%; object-fit:contain; }
-    .omt-native-pano { position:absolute; inset:0; z-index:1; opacity:0; transition:opacity .12s linear; background:#050607; }
+    .omt-board-peek-media > img { display:block; width:100%; height:100%; object-fit:cover; }
+    .omt-native-pano { position:absolute; inset:0; z-index:1; opacity:0; transition:opacity .22s ease-out; background:#050607; }
     .omt-native-pano.omt-native-pano-ready { opacity:1; }
     .omt-board-peek-caption { flex:none; display:flex; justify-content:space-between; gap:20px; padding:7px 9px; color:#fff; background:#17181b; font-size:10px; }
     .omt-board-peek span { color:#8f9198; }
@@ -712,7 +712,7 @@
     .omt-match-tooltip-foot { padding:6px 9px; border-top:1px solid var(--line); color:#c8cad0; font-size:9px; text-align:center; }
     .omt-match-tooltip.omt-match-tooltip-expanded { inset:62px 2vw 40px !important; width:auto; display:grid; grid-template-rows:auto minmax(0,1fr) auto; border-color:#ffffff4a; border-radius:5px; background:#060709fa; box-shadow:0 20px 80px #000f; backdrop-filter:none; }
     .omt-match-tooltip-expanded .omt-match-tooltip-images { min-height:0; height:auto; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
-    .omt-match-tooltip-expanded .omt-match-tooltip-images img { min-width:0; min-height:0; height:100%; object-fit:contain; }
+    .omt-match-tooltip-expanded .omt-match-tooltip-images img { min-width:0; min-height:0; height:100%; object-fit:cover; }
     .omt-match-tooltip-expanded .omt-match-tooltip-native { display:grid; }
     .omt-legend { position:fixed; z-index:2147482999; left:12px; bottom:96px; padding:6px 8px; border:1px solid #ffffff2c; border-radius:5px; color:#d8dade; background:#17181be8; box-shadow:0 5px 20px #0006; font-size:9px; }
     .omt-legend-dot { display:inline-block; width:8px; height:8px; margin:0 4px 0 1px; border:1px solid #fff; border-radius:50%; background:#767981; }
@@ -1449,17 +1449,25 @@
       showRoadLabels: false,
       zoomControl: false,
     });
+    let revealTimer = 0;
     const reveal = () => {
       const status = panorama.getStatus?.();
       if (!maps.StreetViewStatus || status === maps.StreetViewStatus.OK) {
-        container.classList.add("omt-native-pano-ready");
+        window.clearTimeout(revealTimer);
+        // `pano_changed` and OK status precede the first painted tile by a few
+        // frames in some browsers. Keep the correctly filled thumbnail under
+        // it briefly, then crossfade instead of exposing the renderer's black
+        // backing surface.
+        revealTimer = window.setTimeout(() => {
+          if (container.isConnected) container.classList.add("omt-native-pano-ready");
+        }, 140);
       }
     };
     maps.event?.addListenerOnce?.(panorama, "status_changed", reveal);
     maps.event?.addListenerOnce?.(panorama, "pano_changed", () => {
       window.setTimeout(reveal, 50);
     });
-    window.setTimeout(reveal, 700);
+    window.setTimeout(reveal, 850);
     return panorama;
   }
 
