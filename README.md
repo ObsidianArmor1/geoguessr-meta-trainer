@@ -12,7 +12,11 @@ Post-round visual study for these custom maps:
 3. Press **Install**, then play either supported map normally.
 
 The review appears only after a round is over. `M` cycles the map overlays and
-`V` opens the visual-comparison board.
+`V` opens the visual-comparison board. The optional **Guess comparison** layer
+draws the revealed location's visual matches as filled red points and the
+visual neighborhood of the nearest stored panorama to the player's guess as
+hollow violet rings; shared locations carry both marks and the review reports
+their overlap.
 
 ## How it runs
 

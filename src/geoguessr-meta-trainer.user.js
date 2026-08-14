@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.8
+// @version      2.0.0-beta.9
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.8";
+  const USERSCRIPT_VERSION = "2.0.0-beta.9";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -78,7 +78,11 @@
   }
   const MAP_LAYER_STORAGE_KEY = "omt-map-layers-v1";
   const MAP_COLOR_STORAGE_KEY = "omt-map-colors-v1";
-  const DEFAULT_MAP_COLORS = { neighborDots: "#ff334f", neighborClick: "#ff00a8" };
+  const DEFAULT_MAP_COLORS = {
+    neighborDots: "#ff334f",
+    neighborClick: "#ff00a8",
+    guessDots: "#9b6cff",
+  };
   const LIVE_CHALLENGE_PATH = /^\/(?:api\/)?live-challenge\/([^/?#]+)\/?$/;
   const PARTY_LOBBY_PATH = /^\/party\/lobby\/[^/?#]+\/?$/;
   const prewarmedRoundKeys = new Set();
@@ -88,6 +92,7 @@
   const state = {
     review: null,
     fastNeighborhood: null,
+    guessNeighborhood: null,
     active: 0,
     detail: new Map(),
     drawerOpen: false,
@@ -105,8 +110,10 @@
     pinIcons: null,
     showBestMeta: mapLayerPreferences.showBestMeta,
     showVisualNeighbors: mapLayerPreferences.showVisualNeighbors,
+    showGuessNeighbors: mapLayerPreferences.showGuessNeighbors,
     neighborDotColor: mapColorPreferences.neighborDots,
     neighborClickColor: mapColorPreferences.neighborClick,
+    guessDotColor: mapColorPreferences.guessDots,
     matchTooltip: null,
     matchTooltipPoint: null,
     matchTooltipNative: [],
@@ -149,16 +156,18 @@
     try {
       const stored = JSON.parse(localStorage.getItem(MAP_LAYER_STORAGE_KEY) || "null");
       if (stored && typeof stored.showBestMeta === "boolean" && typeof stored.showVisualNeighbors === "boolean") {
+        stored.showGuessNeighbors = stored.showGuessNeighbors === true;
         if (stored.showBestMeta || stored.showVisualNeighbors) return stored;
       }
     } catch (_error) {}
-    return { showBestMeta: false, showVisualNeighbors: true };
+    return { showBestMeta: false, showVisualNeighbors: true, showGuessNeighbors: false };
   }
 
   function saveMapLayerPreferences() {
     localStorage.setItem(MAP_LAYER_STORAGE_KEY, JSON.stringify({
       showBestMeta: state.showBestMeta,
       showVisualNeighbors: state.showVisualNeighbors,
+      showGuessNeighbors: state.showGuessNeighbors,
     }));
   }
 
@@ -174,6 +183,7 @@
       return {
         neighborDots: normalizeColor(stored?.neighborDots, DEFAULT_MAP_COLORS.neighborDots),
         neighborClick: normalizeColor(stored?.neighborClick, DEFAULT_MAP_COLORS.neighborClick),
+        guessDots: normalizeColor(stored?.guessDots, DEFAULT_MAP_COLORS.guessDots),
       };
     } catch (_error) {
       return { ...DEFAULT_MAP_COLORS };
@@ -184,6 +194,7 @@
     localStorage.setItem(MAP_COLOR_STORAGE_KEY, JSON.stringify({
       neighborDots: state.neighborDotColor,
       neighborClick: state.neighborClickColor,
+      guessDots: state.guessDotColor,
     }));
   }
 
@@ -207,6 +218,7 @@
     if (!state.root) return;
     state.root.style.setProperty("--omt-neighbor-dot", state.neighborDotColor);
     state.root.style.setProperty("--omt-neighbor-click", state.neighborClickColor);
+    state.root.style.setProperty("--omt-guess-dot", state.guessDotColor);
   }
 
   function esc(value) {
@@ -224,7 +236,11 @@
   }
 
   function mapLegend(meta, fallback, neighborhood) {
-    return `<div class="omt-legend">${state.showBestMeta ? `<i class="omt-legend-dot"></i> family (${meta.members.toLocaleString()}) <i class="omt-legend-pin"></i> family click` : ""}${state.showVisualNeighbors && neighborhood?.visualMatches?.length ? `<span class="omt-rank-scale"><i></i><i></i><i>1</i></span> similar views · larger = closer <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click` : ""}<i class="omt-legend-current"></i> round</div>`;
+    const guess = state.showVisualNeighbors && state.showGuessNeighbors
+      ? state.guessNeighborhood
+      : null;
+    const overlap = guess?.overlap;
+    return `<div class="omt-legend">${state.showBestMeta ? `<i class="omt-legend-dot"></i> family (${meta.members.toLocaleString()}) <i class="omt-legend-pin"></i> family click` : ""}${state.showVisualNeighbors && neighborhood?.visualMatches?.length ? `<span class="omt-rank-scale"><i></i><i></i><i>1</i></span> round matches · larger = closer <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click` : ""}${guess ? `<i class="omt-legend-guess"></i> guess-side matches${overlap ? ` · ${overlap.sharedLocations}/${overlap.unionLocations} shared` : ""}` : ""}<i class="omt-legend-current"></i> round</div>`;
   }
 
   function request(path, options = {}) {
@@ -696,6 +712,7 @@
     .omt-rank-scale i:nth-child(1) { width:5px; height:5px; opacity:.42; }
     .omt-rank-scale i:nth-child(2) { width:8px; height:8px; opacity:.7; }
     .omt-rank-scale i:nth-child(3) { width:13px; height:13px; box-shadow:0 0 0 2px var(--omt-neighbor-dot,#ff334f); }
+    .omt-legend-guess { display:inline-block; width:10px; height:10px; margin:0 4px 0 8px; border:2px solid var(--omt-guess-dot,#9b6cff); border-radius:50%; background:transparent; box-shadow:0 0 0 1px #fff; vertical-align:-2px; }
     .omt-legend-current { display:inline-block; width:9px; height:9px; margin:0 4px 0 7px; border:2px solid #fff; border-radius:50%; background:#17181b; }
     .omt-legend-pin { position:relative; display:inline-block; width:10px; height:12px; margin:0 3px -2px 6px; border:1px solid #111; border-radius:7px 7px 7px 1px; background:#fff; transform:rotate(-45deg); }
     .omt-legend-pin::after { content:""; position:absolute; width:2px; height:2px; left:3px; top:3px; border-radius:50%; background:#111; }
@@ -870,6 +887,7 @@
       : `This round ranks #${(meta.globalMatchRank || 1).toLocaleString()} in the family and is stronger than ${meta.matchPercentile || "?"}% of its accepted locations.`;
     const neighborhood = review.visualNeighborhood;
     const neighborClick = neighborhood?.weightedClick;
+    const guessComparison = state.showGuessNeighbors ? state.guessNeighborhood : null;
     const clickLines = [
       state.showBestMeta && expected
         ? `<div><strong>Family click</strong><span>${expected.a.toFixed(5)}, ${expected.o.toFixed(5)}</span><span>${Math.round(expected.e).toLocaleString()} average points within this family</span></div>`
@@ -903,6 +921,16 @@
         : "";
       return `<section class="omt-section"><div class="omt-section-head"><h3>${neighborhood.neighbors.toLocaleString()} strongest visual matches</h3><span>${esc(posteriorLabel)}</span></div>${result}<div class="omt-neighborhood">${radiusHtml}</div><p class="omt-note">${esc(posteriorNote)} Median shown-match distance: ${neighborhood.medianDistanceKm.toFixed(1)} km. Closest tenth: ${neighborhood.nearestTenthDistanceKm.toFixed(1)} km. ${esc(densityNote)}</p></section>`;
     })() : "";
+    const guessComparisonHtml = guessComparison ? (() => {
+      const overlap = guessComparison.overlap;
+      const anchorDistance = Number(guessComparison.anchor.distanceFromGuessKm);
+      const distance = anchorDistance < 1
+        ? `${Math.round(anchorDistance * 1000)} m`
+        : `${anchorDistance.toFixed(1)} km`;
+      return `<p class="omt-note"><b>${overlap.sharedLocations.toLocaleString()} shared locations</b> between the two visual cores (${Math.round(overlap.jaccard * 100)}% overlap). Guess-side anchor: the nearest stored map panorama, ${distance} from your click.</p>`;
+    })() : state.showGuessNeighbors && state.playerGuess
+      ? `<p class="omt-note">Loading the visual neighborhood around your guess…</p>`
+      : "";
     state.shadow.innerHTML = `
       <style>${styles}</style><div class="omt">
         <aside class="omt-drawer" aria-label="Post-round visual evidence">
@@ -910,7 +938,7 @@
           <div class="omt-toolbar"><button class="omt-compare-button" id="omt-compare">Compare views <kbd>V</kbd></button><button id="omt-mode-cycle">${mapModeLabel()} <kbd>M</kbd></button><button class="omt-fit" id="omt-fit">Fit map</button></div>
           <div class="omt-scroll">
             ${neighborhoodHtml}
-            <section class="omt-section"><div class="omt-section-head"><h3>Map overlays</h3><span>saved between rounds</span></div><div class="omt-map-actions"><label class="omt-layer-toggle"><input type="checkbox" id="omt-best-meta" ${state.showBestMeta ? "checked" : ""}>Families</label><label class="omt-layer-toggle"><input type="checkbox" id="omt-neighbors" ${state.showVisualNeighbors ? "checked" : ""}>Similar</label><label class="omt-color-setting">Dots <input type="color" id="omt-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-click-color" value="${state.neighborClickColor}"></label></div><div class="omt-click-lines">${clickLines || ""}</div></section>
+            <section class="omt-section"><div class="omt-section-head"><h3>Map overlays</h3><span>saved between rounds</span></div><div class="omt-map-actions"><label class="omt-layer-toggle"><input type="checkbox" id="omt-best-meta" ${state.showBestMeta ? "checked" : ""}>Families</label><label class="omt-layer-toggle"><input type="checkbox" id="omt-neighbors" ${state.showVisualNeighbors ? "checked" : ""}>Round matches</label><label class="omt-layer-toggle" title="Compare the visual neighborhood near your guess with the revealed location"><input type="checkbox" id="omt-guess-neighbors" ${state.showGuessNeighbors ? "checked" : ""} ${state.playerGuess ? "" : "disabled"}>Guess comparison</label><label class="omt-color-setting">Round <input type="color" id="omt-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Guess <input type="color" id="omt-guess-dot-color" value="${state.guessDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-click-color" value="${state.neighborClickColor}"></label></div>${guessComparisonHtml}<div class="omt-click-lines">${clickLines || ""}</div></section>
             <section class="omt-section"><div class="omt-section-head"><h3>Matched families</h3><span>${metas.length} shown${review.moreMetas?.length ? ` · ${review.moreMetas.length} more` : ""}</span></div><nav class="omt-nav"><button id="omt-prev" ${state.active === 0 ? "disabled" : ""}>←</button><select id="omt-select" aria-label="Active family">${optionHtml}</select><button id="omt-next" ${state.active === metas.length - 1 ? "disabled" : ""}>→</button></nav>${review.moreMetas?.length ? `<button class="omt-more" id="omt-more">Add next family (${review.moreMetas.length} remaining)</button>` : ""}<div class="omt-family-head"><div><h2>${esc(familyDisplayTitle(meta))}</h2><p>${agreement}</p></div><span class="omt-strength">${esc(strengthLabel)}</span></div><div class="omt-metrics"><div class="omt-metric"><b>${(meta.bits || 0).toFixed(2)}</b><span>location bits</span></div><div class="omt-metric"><b>${meta.members.toLocaleString()}</b><span>family locations</span></div><div class="omt-metric"><b>${Number.isFinite(meta.repeatability) ? `${Math.round(meta.repeatability * 100)}%` : "—"}</b><span>replicated</span></div></div>${usefulFamilyDescription(meta) ? `<p class="omt-description">${esc(usefulFamilyDescription(meta))}</p>` : ""}${filtered ? `<details class="omt-system-details"><summary>Filtering details</summary>${esc(filtered)}</details>` : ""}</section>
             <section class="omt-section"><div class="omt-section-head"><h3>This round</h3><span>${viewEvidence ? "family evidence by direction" : "four stored directions"}</span></div><div class="omt-views">${viewHtml}</div></section>
             <section class="omt-section"><div class="omt-section-head"><h3>Family examples</h3><span>this round + eight representative views</span></div><button class="omt-evidence" data-image="${esc(representativeViews)}" data-label="${esc(familyDisplayTitle(meta))} · representative views"><img data-src="${esc(representativeViews)}" alt="Representative views for ${esc(familyDisplayTitle(meta))}"></button><p class="omt-note">${esc(evidenceNote)}</p></section>
@@ -948,11 +976,17 @@
     state.shadow.getElementById("omt-neighbors")?.addEventListener("change", (event) => {
       setMapLayer("neighbors", event.target.checked);
     });
+    state.shadow.getElementById("omt-guess-neighbors")?.addEventListener("change", (event) => {
+      setGuessComparison(event.target.checked);
+    });
     state.shadow.getElementById("omt-dot-color")?.addEventListener("input", (event) => {
       setMapColor("dots", event.target.value);
     });
     state.shadow.getElementById("omt-click-color")?.addEventListener("input", (event) => {
       setMapColor("click", event.target.value);
+    });
+    state.shadow.getElementById("omt-guess-dot-color")?.addEventListener("input", (event) => {
+      setMapColor("guess", event.target.value);
     });
     for (const button of state.shadow.querySelectorAll("[data-feedback]")) {
       button.addEventListener("click", () => saveFeedback(button.dataset.feedback));
@@ -965,6 +999,8 @@
   function setMapColor(kind, value) {
     if (kind === "dots") {
       state.neighborDotColor = normalizeColor(value, state.neighborDotColor);
+    } else if (kind === "guess") {
+      state.guessDotColor = normalizeColor(value, state.guessDotColor);
     } else {
       state.neighborClickColor = normalizeColor(value, state.neighborClickColor);
       state.pinIcons = null;
@@ -972,6 +1008,21 @@
     saveMapColorPreferences();
     syncMapColorVariables();
     if (state.review || state.fastNeighborhood) showMetaOnMap(false);
+  }
+
+  function setGuessComparison(enabled) {
+    state.showGuessNeighbors = Boolean(enabled);
+    saveMapLayerPreferences();
+    if (state.showGuessNeighbors && !state.showVisualNeighbors) {
+      state.showVisualNeighbors = true;
+      saveMapLayerPreferences();
+    }
+    render();
+    if (state.showGuessNeighbors) {
+      loadGuessNeighborhood(state.requestToken);
+    } else {
+      showMetaOnMap(false);
+    }
   }
 
   function setMapLayer(layer, enabled) {
@@ -1708,7 +1759,7 @@
       ? `current:${point.mapIndex}`
       : point.family
         ? `family:${point.mapIndex}`
-        : `${point.mapIndex}:${point.rank}`;
+        : `${point.comparisonSide || "round"}:${point.mapIndex}:${point.rank}`;
     if (state.hoveredMatchKey === key && state.matchTooltip?.isConnected) {
       positionMatchTooltip(state.matchTooltip, clientX, clientY);
       return;
@@ -1725,11 +1776,12 @@
       ? `current:${point.mapIndex}`
       : point.family
         ? `family:${point.mapIndex}`
-        : `${point.mapIndex}:${point.rank}`;
+        : `${point.comparisonSide || "round"}:${point.mapIndex}:${point.rank}`;
     if (!state.shadow || state.hoveredMatchKey !== key) return;
     const token = ++state.matchTooltipToken;
     const tooltip = document.createElement("div");
     tooltip.className = "omt-match-tooltip";
+    if (point.dotColor) tooltip.style.borderColor = point.dotColor;
     tooltip.classList.toggle("omt-match-tooltip-expanded", state.matchTooltipShift);
     const distance = point.distanceKm < 1
       ? `${Math.round(point.distanceKm * 1000)} m away`
@@ -1738,7 +1790,7 @@
       ? `<b>This round</b><span>GeoGuessr's revealed location<br>four stored directions</span>`
       : point.family
         ? `<b>${esc(point.familyLabel || "Meta location")}</b><span>one of ${Number(point.familyMembers || 0).toLocaleString()} accepted locations<br>four stored directions</span>`
-        : `<b>Visual match #${point.rank}</b><span>${esc(distance)}<br>similarity ${Number(point.similarity).toFixed(3)} · click influence ${(Number(point.posteriorWeight || 0) * 100).toFixed(1)}%</span>`;
+        : `<b style="color:${esc(point.dotColor || state.neighborDotColor)}">${point.comparisonSide === "guess" ? "Guess-side" : "Round"} visual match #${point.rank}</b><span>${esc(distance)}${point.comparisonSide === "guess" ? " from its anchor" : ""}<br>similarity ${Number(point.similarity).toFixed(3)}${point.comparisonSide === "guess" ? "" : ` · click influence ${(Number(point.posteriorWeight || 0) * 100).toFixed(1)}%`}</span>`;
     const footer = point.current
       ? "Hovering GeoGuessr's icon · hold Shift to enlarge · click to open this panorama ↗"
       : "Hold Shift to enlarge · click the dot to open this panorama in Google Maps ↗";
@@ -1757,7 +1809,7 @@
         ? "This round"
         : point.family
           ? (point.familyLabel || "Meta location")
-          : `Visual match ${point.rank}`;
+          : `${point.comparisonSide === "guess" ? "Guess-side" : "Round"} visual match ${point.rank}`;
       tooltip.querySelector(".omt-match-tooltip-images").innerHTML = urls.map((url, slot) => `<img src="${esc(url)}" alt="${esc(imageLabel)}, direction ${slot + 1}">`).join("");
     } catch (_error) {
       if (token === state.matchTooltipToken && tooltip.isConnected) {
@@ -2003,6 +2055,8 @@
             // Bind map-index ownership when the overlay is created. Fast dots
             // can be hovered before the full review has populated state.review.
             datasetKey: value.datasetKey || options.datasetKey || "",
+            comparisonSide: options.comparisonSide || "round",
+            dotColor: options.dotColor || state.neighborDotColor,
             family: this.mode === "family",
             familyLabel: options.familyLabel || "",
             familyMembers: Number(options.familyMembers || coordinates.length),
@@ -2025,7 +2079,7 @@
         this.canvas.setAttribute("aria-hidden", "true");
         const pane = this.getPanes().overlayMouseTarget || this.getPanes().overlayLayer;
         pane.appendChild(this.canvas);
-        if (this.mode === "neighbors") {
+        if (this.mode === "neighbors" || this.mode === "guess-neighbors") {
           this.hitLayer = document.createElement("div");
           this.hitLayer.style.position = "absolute";
           this.hitLayer.style.zIndex = "11";
@@ -2188,9 +2242,10 @@
           : 1.8;
         const radius = Math.max(1.6, Math.min(6.4, baseRadius + (zoom - 10) * 0.18));
         let visible = 0;
-        if (this.mode === "neighbors") {
+        if (this.mode === "neighbors" || this.mode === "guess-neighbors") {
           const rankedPoints = [...this.points].sort((a, b) => (b.rank || 0) - (a.rank || 0));
           const visibleHitTargets = [];
+          const guessSide = this.mode === "guess-neighbors";
           for (const point of rankedPoints) {
             const pixel = viewportPoint(point);
             if (pixel.x < -18 || pixel.x > width + 18 || pixel.y < -18 || pixel.y > height + 18) continue;
@@ -2198,6 +2253,7 @@
             const { x, y } = pixel;
             const strength = Math.max(0, Math.min(1, point.strength));
             const topTen = point.rank > 0 && point.rank <= 10;
+            const dotColor = point.dotColor || state.neighborDotColor;
             const pointRadius = Math.max(
               radius * (0.42 + strength * 0.95),
               topTen ? (point.rank === 1 ? 8.5 : 6.5) : 0,
@@ -2205,19 +2261,21 @@
             if (point.rank > 0 && point.rank <= 5) {
               context.beginPath();
               context.arc(x, y, pointRadius + 3.2, 0, Math.PI * 2);
-              context.strokeStyle = colorRgba(state.neighborDotColor, 0.25 + strength * 0.34);
+              context.strokeStyle = colorRgba(dotColor, 0.25 + strength * 0.34);
               context.lineWidth = point.rank === 1 ? 3 : 2;
               context.stroke();
             }
             context.beginPath();
-            context.arc(x, y, pointRadius, 0, Math.PI * 2);
-            context.fillStyle = colorRgba(state.neighborDotColor, 0.32 + strength * 0.66);
+            context.arc(x, y, pointRadius + (guessSide ? 1.8 : 0), 0, Math.PI * 2);
+            context.fillStyle = colorRgba(dotColor, guessSide ? 0.08 : 0.32 + strength * 0.66);
             context.fill();
-            context.strokeStyle = `rgba(255,255,255,${0.42 + strength * 0.56})`;
-            context.lineWidth = 0.8 + strength * 1.4;
+            context.strokeStyle = guessSide
+              ? colorRgba(dotColor, 0.62 + strength * 0.38)
+              : `rgba(255,255,255,${0.42 + strength * 0.56})`;
+            context.lineWidth = guessSide ? 2.2 + strength * 1.2 : 0.8 + strength * 1.4;
             context.stroke();
             if (topTen) {
-              context.fillStyle = contrastColor(state.neighborDotColor);
+              context.fillStyle = guessSide ? dotColor : contrastColor(dotColor);
               context.font = `800 ${point.rank === 10 ? 7 : 8}px Arial,sans-serif`;
               context.textAlign = "center";
               context.textBaseline = "middle";
@@ -2236,7 +2294,7 @@
               continue;
             }
             button.omtPoint = target.point;
-            button.title = `Visual match #${target.point.rank} — preview; click to open Street View`;
+            button.title = `${guessSide ? "Guess-side" : "Round"} visual match #${target.point.rank} — preview; click to open Street View`;
             button.setAttribute("aria-label", button.title);
             button.style.display = "block";
             button.style.left = `${target.x - target.hitRadius}px`;
@@ -2303,7 +2361,7 @@
       }
       onRemove() {
         cancelAnimationFrame(this.frame);
-        if (this.mode === "neighbors" || this.mode === "family") {
+        if (this.mode === "neighbors" || this.mode === "guess-neighbors" || this.mode === "family") {
           hideMatchTooltip();
         }
         this.hitLayer?.remove();
@@ -2438,6 +2496,8 @@
       const neighbors = distributionOverlay(maps, map, visualMatches, {
         mode: "neighbors",
         datasetKey: context.datasetKey,
+        comparisonSide: "round",
+        dotColor: state.neighborDotColor,
         current: {
           mapIndex: context.location.mapIndex,
           panoId: context.location.panoId,
@@ -2450,6 +2510,22 @@
       });
       if (neighbors) state.overlays.push(neighbors);
       for (const neighbor of visualMatches) {
+        bounds.extend({ lat: neighbor.latitude, lng: neighbor.longitude });
+      }
+    }
+    const guessComparison = state.showVisualNeighbors && state.showGuessNeighbors
+      ? state.guessNeighborhood
+      : null;
+    const guessMatches = guessComparison?.visualNeighborhood?.visualMatches || [];
+    if (guessMatches.length) {
+      const guessNeighbors = distributionOverlay(maps, map, guessMatches, {
+        mode: "guess-neighbors",
+        datasetKey: context.datasetKey,
+        comparisonSide: "guess",
+        dotColor: state.guessDotColor,
+      });
+      if (guessNeighbors) state.overlays.push(guessNeighbors);
+      for (const neighbor of guessMatches) {
         bounds.extend({ lat: neighbor.latitude, lng: neighbor.longitude });
       }
     }
@@ -2521,6 +2597,7 @@
     state.requestToken += 1;
     state.review = null;
     state.fastNeighborhood = null;
+    state.guessNeighborhood = null;
     state.active = 0;
     state.detail.clear();
     state.drawerOpen = false;
@@ -2643,6 +2720,29 @@
       if (state.showVisualNeighbors) showMetaOnMap(false);
     } catch (error) {
       console.error("Meta Trainer: could not load neighbor recommendation", error);
+    }
+  }
+
+  async function loadGuessNeighborhood(token) {
+    const review = state.review;
+    const guess = state.playerGuess;
+    if (!state.showGuessNeighbors || !review || !guess) return;
+    try {
+      const query = new URLSearchParams({
+        dataset: review.datasetKey,
+        guess_lat: guess.lat,
+        guess_lng: guess.lng,
+      });
+      const comparison = await request(
+        `/api/guess-neighborhood/${review.location.mapIndex}?${query}`,
+      );
+      if (token !== state.requestToken || state.review !== review
+          || !state.showGuessNeighbors) return;
+      state.guessNeighborhood = comparison;
+      render();
+      showMetaOnMap(false);
+    } catch (error) {
+      console.error("Meta Trainer: could not load guess-side visual neighborhood", error);
     }
   }
 
@@ -2972,6 +3072,7 @@
       state.detail.clear();
       state.drawerOpen = false;
       render();
+      if (state.showGuessNeighbors) loadGuessNeighborhood(token);
       recordRoundOutcome(round, review).catch(() => {
         // Passive local history must never affect the post-round interface.
       });
