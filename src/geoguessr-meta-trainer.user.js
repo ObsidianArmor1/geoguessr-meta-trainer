@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.2
+// @version      2.0.0-beta.3
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.2";
+  const USERSCRIPT_VERSION = "2.0.0-beta.3";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -81,6 +81,7 @@
   const DEFAULT_MAP_COLORS = { neighborDots: "#ff334f", neighborClick: "#ff00a8" };
   const LIVE_CHALLENGE_PATH = /^\/(?:api\/)?live-challenge\/([^/?#]+)\/?$/;
   const PARTY_LOBBY_PATH = /^\/party\/lobby\/[^/?#]+\/?$/;
+  const prewarmedRoundKeys = new Set();
   const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
   const mapLayerPreferences = readMapLayerPreferences();
   const mapColorPreferences = readMapColorPreferences();
@@ -224,6 +225,69 @@
 
   function request(path, options = {}) {
     return portableApi.request(path, options);
+  }
+
+  function warmMapForRound(eventState) {
+    const datasetKey = [
+      eventState?.map?.id,
+      eventState?.mapId,
+      eventState?.mapKey,
+      eventState?.datasetKey,
+    ].find((value) => typeof value === "string" && value.length);
+    if (!datasetKey) return;
+    // The 50k-location core is the largest cold-start cost. Begin downloading
+    // and parsing it when play starts instead of after the guess is submitted.
+    portableApi.loadMap(datasetKey).catch(() => {
+      // Unsupported maps are normal; the trainer remains dormant on them.
+    });
+  }
+
+  function decodedPanoId(value) {
+    const text = String(value || "");
+    if (!text || text.length % 2 || !/^[0-9a-f]+$/i.test(text)) return text;
+    let decoded = "";
+    for (let index = 0; index < text.length; index += 2) {
+      decoded += String.fromCharCode(parseInt(text.slice(index, index + 2), 16));
+    }
+    return /^[\x20-\x7e]+$/.test(decoded) ? decoded : text;
+  }
+
+  function prewarmRawRound(data) {
+    const roundNumber = Number(data?.round);
+    const guesses = data?.player?.guesses;
+    // A raw game response contains the current location during play. Use it
+    // only to prepare private caches; no trainer UI is exposed before round_end.
+    if (!Number.isInteger(roundNumber) || !Array.isArray(guesses)
+        || guesses.length >= roundNumber) return;
+    const location = data?.rounds?.[roundNumber - 1];
+    const datasetKey = typeof data?.map === "string" ? data.map : data?.map?.id;
+    const panoId = decodedPanoId(location?.panoId);
+    const latitude = Number(location?.lat);
+    const longitude = Number(location?.lng);
+    if (!datasetKey || (!panoId && (!Number.isFinite(latitude) || !Number.isFinite(longitude)))) return;
+    const key = `${data.token || "game"}:${roundNumber}:${panoId || `${latitude},${longitude}`}`;
+    if (prewarmedRoundKeys.has(key)) return;
+    prewarmedRoundKeys.add(key);
+    if (prewarmedRoundKeys.size > 30) prewarmedRoundKeys.delete(prewarmedRoundKeys.values().next().value);
+    const params = new URLSearchParams({ map_key: datasetKey });
+    if (panoId) params.set("pano_id", panoId);
+    if (Number.isFinite(latitude)) params.set("lat", latitude);
+    if (Number.isFinite(longitude)) params.set("lng", longitude);
+    request(`/api/review?${params}`).then(async (review) => {
+      if (!review?.matched) return;
+      const dataset = encodeURIComponent(review.datasetKey);
+      const mapIndex = review.location.mapIndex;
+      const [, board] = await Promise.all([
+        request(`/api/neighborhood/${mapIndex}?dataset=${dataset}`),
+        request(`/api/visual-board/${mapIndex}?dataset=${dataset}`),
+      ]);
+      // The V-board thumbnails are also predictable before the result page.
+      // Decode them opportunistically so opening V remains immediate.
+      await warmVisualBoard(board);
+    }).catch(() => {
+      // Prewarming is an optimization. The ordinary post-round retry path
+      // remains authoritative if a connection drops while the round is live.
+    });
   }
 
   async function criticalRequest(path, options = {}) {
@@ -2791,8 +2855,15 @@
       const framework = pageWindow.GeoGuessrEventFramework;
       if (framework) {
         await framework.init();
-        framework.events.addEventListener("round_start", clearRound);
+        framework.events.addEventListener("round_start", (event) => {
+          clearRound();
+          warmMapForRound(event.detail);
+        });
         framework.events.addEventListener("round_end", (event) => handleRoundEnd(event.detail));
+        pageWindow.GEFFetchEvents?.addEventListener("received_data", (event) => {
+          prewarmRawRound(event.detail);
+        });
+        if (framework.state?.round_in_progress) warmMapForRound(framework.state);
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 20));

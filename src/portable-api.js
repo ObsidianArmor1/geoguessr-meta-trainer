@@ -178,6 +178,8 @@
       this.chunkPromises = new Map();
       this.boardChunkPromises = new Map();
       this.neighborhoodPromises = new Map();
+      this.weightedNeighborhoodPromises = new Map();
+      this.reviewPromises = new Map();
       this.projectionChunkPromises = new Map();
     }
 
@@ -487,14 +489,20 @@
         this.neighborhoodPromises.set(key, this.computeNeighborhood(map, mapIndex));
       }
       const computed = await this.neighborhoodPromises.get(key);
-      const result = { ...computed.result };
       if (includeWeightedClick) {
-        result.weightedClick = this.optimizeWeightedClick(
-          map,
-          computed.indices,
-          computed.calibrated,
-        );
+        if (!this.weightedNeighborhoodPromises.has(key)) {
+          this.weightedNeighborhoodPromises.set(key, Promise.resolve().then(() => ({
+            ...computed.result,
+            weightedClick: this.optimizeWeightedClick(
+              map,
+              computed.indices,
+              computed.calibrated,
+            ),
+          })));
+        }
+        return this.weightedNeighborhoodPromises.get(key);
       }
+      const result = { ...computed.result };
       return result;
     }
 
@@ -1103,7 +1111,21 @@
         );
         if (!resolved) return { matched: false, matchMethod: "unmatched", datasetKey: datasetHint };
         if (url.pathname === "/api/review") {
-          return this.review(resolved.map, resolved.mapIndex, resolved.method, resolved.distance);
+          const reviewKey = `${resolved.map.entry.datasetKey}:${resolved.mapIndex}`;
+          if (!this.reviewPromises.has(reviewKey)) {
+            this.reviewPromises.set(reviewKey, this.review(
+              resolved.map,
+              resolved.mapIndex,
+              resolved.method,
+              resolved.distance,
+            ));
+          }
+          const review = await this.reviewPromises.get(reviewKey);
+          return {
+            ...review,
+            matchMethod: resolved.method,
+            matchDistanceM: resolved.distance,
+          };
         }
         const row = resolved.map.core.panoramas[resolved.mapIndex];
         return {
