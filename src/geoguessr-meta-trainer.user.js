@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.14
+// @version      2.0.0-beta.15
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.14";
+  const USERSCRIPT_VERSION = "2.0.0-beta.15";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -554,13 +554,13 @@
     .omt-legend-pin::after { content:""; position:absolute; width:3px; height:3px; left:2.5px; top:2.5px; border-radius:50%; background:#15191c; }
     .omt-legend-pin-neighbors { width:14px; height:14px; margin:0 5px -2px 10px; border:2px solid #fff; border-radius:2px; background:var(--omt-neighbor-click,#ff00a8); box-shadow:0 0 0 2px #15191c; transform:rotate(45deg); }
     .omt-legend-pin-neighbors::after { display:none; }
-    .omt-recommendation-receipt { position:fixed; z-index:2147483001; left:50%; bottom:100px; display:flex; gap:16px; max-width:calc(100vw - 32px); transform:translateX(-50%); color:#fff; font:700 11px/1.2 Arial,sans-serif; pointer-events:none; }
-    .omt-recommendation-receipt div { display:flex; align-items:baseline; gap:7px; padding:0; border:0; color:#fff; background:transparent; box-shadow:none; white-space:nowrap; }
-    .omt-recommendation-receipt div::before { content:""; width:5px; height:5px; border-radius:50%; background:#9290a8; }
+    .omt-recommendation-receipt { position:fixed; z-index:2147483001; left:50%; bottom:106px; display:flex; gap:8px; max-width:calc(100vw - 32px); transform:translateX(-50%); color:#fff; font:600 12px/1.1 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; pointer-events:none; }
+    .omt-recommendation-receipt div { display:flex; align-items:baseline; gap:8px; padding:7px 11px; border:1px solid #ffffff24; border-radius:7px; color:#fff; background:#17142cf2; box-shadow:0 5px 16px #0008; white-space:nowrap; }
+    .omt-recommendation-receipt div::before { content:""; width:6px; height:6px; border-radius:50%; background:#9290a8; }
     .omt-recommendation-receipt div.omt-neighbor-result::before { background:var(--omt-neighbor-click,#ff00a8); }
-    .omt-recommendation-receipt span { color:#aaa7bd; font-size:9px; letter-spacing:.045em; text-transform:uppercase; }
-    .omt-recommendation-receipt strong { color:#fff; font-size:14px; font-variant-numeric:tabular-nums; }
-    .omt-recommendation-receipt em { color:#c7c4d4; font-size:11px; font-style:normal; font-variant-numeric:tabular-nums; }
+    .omt-recommendation-receipt span { color:#bbb8ca; font-size:11px; }
+    .omt-recommendation-receipt strong { color:#fff; font-size:16px; font-variant-numeric:tabular-nums; }
+    .omt-recommendation-receipt em { color:#d1cedc; font-size:12px; font-style:normal; font-variant-numeric:tabular-nums; }
     @media(max-width:850px){.omt-drawer{width:100vw;min-width:0;bottom:74px}.omt-launch{top:10px;right:10px}.omt-views{grid-template-columns:1fr}.omt-view,.omt-view img{height:190px}.omt-feedback,.omt-neighborhood{grid-template-columns:1fr 1fr}}
   `;
 
@@ -715,19 +715,19 @@
     .omt-legend-pin::after { content:""; position:absolute; width:2px; height:2px; left:3px; top:3px; border-radius:50%; background:#111; }
     .omt-legend-pin-neighbors { width:11px; height:11px; margin:0 4px -2px 7px; border:1px solid #fff; border-radius:1px; background:var(--omt-neighbor-click,#ff00a8); box-shadow:0 0 0 1px #111; transform:rotate(45deg); }
     .omt-legend-pin-neighbors::after { display:none; }
-    .omt-recommendation-receipt { position:fixed; z-index:2147483001; left:50%; bottom:100px; display:flex; gap:16px; max-width:calc(100vw - 24px); transform:translateX(-50%); color:#fff; font:700 11px/1.2 Arial,sans-serif; pointer-events:none; }
-    .omt-recommendation-receipt div { display:flex; align-items:baseline; gap:7px; min-width:0; padding:0; border:0; color:#fff; background:transparent; box-shadow:none; white-space:nowrap; backdrop-filter:none; }
-    .omt-recommendation-receipt div::before { content:""; flex:0 0 auto; width:5px; height:5px; border-radius:50%; background:#9290a8; }
+    .omt-recommendation-receipt { position:fixed; z-index:2147483001; left:50%; bottom:106px; display:flex; gap:8px; max-width:calc(100vw - 24px); transform:translateX(-50%); color:#fff; font:600 12px/1.1 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; pointer-events:none; }
+    .omt-recommendation-receipt div { display:flex; align-items:baseline; gap:8px; min-width:0; padding:7px 11px; border:1px solid #ffffff24; border-radius:7px; color:#fff; background:#17142cf2; box-shadow:0 5px 16px #0008; white-space:nowrap; backdrop-filter:none; }
+    .omt-recommendation-receipt div::before { content:""; flex:0 0 auto; width:6px; height:6px; border-radius:50%; background:#9290a8; }
     .omt-recommendation-receipt div.omt-neighbor-result::before { background:var(--omt-neighbor-click,#ff00a8); }
-    .omt-recommendation-receipt span { margin:0; color:#aaa7bd; font-size:9px; font-weight:700; letter-spacing:.045em; text-transform:uppercase; }
-    .omt-recommendation-receipt strong { color:#fff; font-size:14px; line-height:1; font-variant-numeric:tabular-nums; }
-    .omt-recommendation-receipt em { color:#c7c4d4; font-size:11px; font-style:normal; font-weight:700; font-variant-numeric:tabular-nums; }
+    .omt-recommendation-receipt span { margin:0; color:#bbb8ca; font-size:11px; font-weight:600; }
+    .omt-recommendation-receipt strong { color:#fff; font-size:16px; line-height:1; font-weight:800; font-variant-numeric:tabular-nums; }
+    .omt-recommendation-receipt em { color:#d1cedc; font-size:12px; font-style:normal; font-weight:650; font-variant-numeric:tabular-nums; }
     @media(max-width:850px) {
       .omt-dock { top:8px; right:8px; max-width:calc(100vw - 16px); }
       .omt-dock button { padding:7px 9px; }
       .omt-drawer { inset:8px 8px 78px; width:auto; min-width:0; }
       .omt-neighborhood,.omt-feedback { grid-template-columns:1fr 1fr; }
-      .omt-recommendation-receipt { bottom:92px; gap:10px; }
+      .omt-recommendation-receipt { bottom:98px; gap:6px; }
       .omt-recommendation-receipt span { display:none; }
       .omt-views { grid-template-columns:1fr; }
       .omt-view,.omt-view img { height:190px; }
@@ -780,13 +780,13 @@
       const metaClick = (meta.click || state.detail.get(meta.id)?.click)?.s?.expected;
       const outcome = realizedRecommendation(metaClick, neighborhood);
       if (outcome) {
-        receipts.push(`<div class="omt-family-result"><span>Family recommendation</span><strong>${Math.round(outcome.score).toLocaleString()} pts</strong><em>${formatOutcomeDistance(outcome.distanceKm)}</em></div>`);
+        receipts.push(`<div class="omt-family-result"><span>Family click</span><strong>${Math.round(outcome.score).toLocaleString()} pts</strong><em>${formatOutcomeDistance(outcome.distanceKm)}</em></div>`);
       }
     }
     if (state.showVisualNeighbors) {
       const outcome = realizedRecommendation(neighborhood.weightedClick, neighborhood);
       if (outcome) {
-        receipts.push(`<div class="omt-neighbor-result"><span>Visual recommendation</span><strong>${Math.round(outcome.score).toLocaleString()} pts</strong><em>${formatOutcomeDistance(outcome.distanceKm)}</em></div>`);
+        receipts.push(`<div class="omt-neighbor-result"><span>Visual click</span><strong>${Math.round(outcome.score).toLocaleString()} pts</strong><em>${formatOutcomeDistance(outcome.distanceKm)}</em></div>`);
       }
     }
     return receipts.length
