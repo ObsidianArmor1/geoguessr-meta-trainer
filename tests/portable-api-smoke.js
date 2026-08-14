@@ -28,7 +28,8 @@ async function main() {
       );
       assert.equal(review.matched, true);
       assert.equal(review.location.mapIndex, mapIndex);
-      assert.equal(review.visualNeighborhood.visualMatches.length, 100);
+      assert.ok(review.visualNeighborhood.visualMatches.length >= 8);
+      assert.ok(review.visualNeighborhood.visualMatches.length <= 512);
       assert.ok(review.location.views.every((url) => url.startsWith(
         "https://streetviewpixels-pa.googleapis.com/v1/thumbnail?",
       )));

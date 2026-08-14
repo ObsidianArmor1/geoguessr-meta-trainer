@@ -3,9 +3,9 @@
 
 The portable packs intentionally exclude model embeddings and Street View image
 bytes.  They retain the fixed-map lookup information needed after a round:
-panorama identity and coordinates, discovered families, calibrated Top-100
-neighbor indices/similarities, and the metadata required to reproduce review
-ranking in the browser.
+panorama identity and coordinates, discovered families, calibrated adaptive
+visual-neighbor indices/similarities, and the metadata required to reproduce
+review ranking in the browser.
 """
 
 from __future__ import annotations
@@ -24,7 +24,8 @@ import numpy as np
 
 FORMAT = "geoguessr-portable-meta-pack"
 VERSION = 1
-NEIGHBOR_MAGIC = b"OMTNBR01"
+NEIGHBOR_MAGIC_V1 = b"OMTNBR01"
+NEIGHBOR_MAGIC_V2 = b"OMTNBR02"
 
 
 def write_json(path: Path, payload: object) -> None:
@@ -100,31 +101,58 @@ def write_neighbor_chunks(
     indices: np.ndarray,
     similarities: np.ndarray,
     chunk_rows: int,
+    offsets: np.ndarray | None = None,
 ) -> list[dict]:
     destination.mkdir(parents=True, exist_ok=True)
-    if indices.shape != similarities.shape or indices.ndim != 2:
-        raise ValueError("neighbor arrays must be equal two-dimensional matrices")
+    if indices.shape != similarities.shape:
+        raise ValueError("neighbor arrays must have equal shapes")
     if indices.dtype != np.int32:
         indices = indices.astype(np.int32)
     if similarities.dtype != np.float16:
         similarities = similarities.astype(np.float16)
 
-    rows, neighbors = indices.shape
+    if offsets is None and indices.ndim != 2:
+        raise ValueError("fixed neighbor arrays must be two-dimensional")
+    if offsets is not None:
+        offsets = np.asarray(offsets, np.int64)
+        if indices.ndim != 1 or len(offsets) < 2 or offsets[-1] != len(indices):
+            raise ValueError("adaptive neighbor offsets are invalid")
+        rows = len(offsets) - 1
+    else:
+        rows, neighbors = indices.shape
     chunks = []
     for start in range(0, rows, chunk_rows):
         stop = min(rows, start + chunk_rows)
         filename = f"{start // chunk_rows:05d}.bin.gz"
         path = destination / filename
-        header = struct.pack(
-            "<8sIIII", NEIGHBOR_MAGIC, VERSION, start, stop - start, neighbors
-        )
-        body = b"".join(
-            (
-                header,
-                np.asarray(indices[start:stop], dtype="<i4").tobytes(order="C"),
-                np.asarray(similarities[start:stop], dtype="<f2").tobytes(order="C"),
+        if offsets is None:
+            header = struct.pack(
+                "<8sIIII", NEIGHBOR_MAGIC_V1, VERSION, start, stop - start, neighbors
             )
-        )
+            body = b"".join(
+                (
+                    header,
+                    np.asarray(indices[start:stop], dtype="<i4").tobytes(order="C"),
+                    np.asarray(similarities[start:stop], dtype="<f2").tobytes(order="C"),
+                )
+            )
+        else:
+            edge_start, edge_stop = int(offsets[start]), int(offsets[stop])
+            local_offsets = np.asarray(
+                offsets[start:stop + 1] - edge_start, dtype="<u4"
+            )
+            header = struct.pack(
+                "<8sIIII", NEIGHBOR_MAGIC_V2, 2, start, stop - start,
+                edge_stop - edge_start,
+            )
+            body = b"".join(
+                (
+                    header,
+                    local_offsets.tobytes(order="C"),
+                    np.asarray(indices[edge_start:edge_stop], dtype="<i4").tobytes(order="C"),
+                    np.asarray(similarities[edge_start:edge_stop], dtype="<f2").tobytes(order="C"),
+                )
+            )
         with path.open("wb") as raw:
             with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6, mtime=0) as stream:
                 stream.write(body)
@@ -148,7 +176,9 @@ def compile_map(manifest_path: Path, output_root: Path, chunk_rows: int) -> tupl
     trainer_artifacts = source_manifest.get("trainer_artifacts", {})
 
     review_path = dataset_root / artifacts["review_index"]
-    neighbor_root = dataset_root / artifacts["nearest_neighbors"]
+    neighbor_root = dataset_root / "trainer" / "adaptive-neighbors-v1"
+    if not (neighbor_root / "neighbor_offsets.i64.npy").is_file():
+        neighbor_root = dataset_root / artifacts["nearest_neighbors"]
     if not neighbor_root.is_dir():
         neighbor_root = (dataset_root / trainer_artifacts["neighborRoot"]).resolve()
     review = json.loads(review_path.read_text(encoding="utf-8"))
@@ -156,19 +186,22 @@ def compile_map(manifest_path: Path, output_root: Path, chunk_rows: int) -> tupl
     similarities = np.load(
         neighbor_root / "neighbor_similarities.f16.npy", mmap_mode="r"
     )
+    offsets_path = neighbor_root / "neighbor_offsets.i64.npy"
+    offsets = np.load(offsets_path, mmap_mode="r") if offsets_path.is_file() else None
     calibration = json.loads(
         (neighbor_root / "neighbor_weight_calibration_v1.json").read_text()
     )
     neighbor_summary = json.loads((neighbor_root / "summary.json").read_text())
 
-    if len(review["panoramas"]) != len(indices):
+    neighbor_rows = len(offsets) - 1 if offsets is not None else len(indices)
+    if len(review["panoramas"]) != neighbor_rows:
         raise ValueError(f"panorama/neighbor mismatch for {dataset_key}")
 
     destination = output_root / "maps" / dataset_key
     core_path = destination / "core.json.gz"
     write_gzip_json(core_path, public_core(review))
     chunks = write_neighbor_chunks(
-        destination / "neighbors", indices, similarities, chunk_rows
+        destination / "neighbors", indices, similarities, chunk_rows, offsets
     )
     manifest = {
         "format": FORMAT,
@@ -176,7 +209,7 @@ def compile_map(manifest_path: Path, output_root: Path, chunk_rows: int) -> tupl
         "datasetKey": dataset_key,
         "displayName": source_manifest.get("display_name", dataset_key),
         "panoramas": len(review["panoramas"]),
-        "neighborsPerPanorama": int(indices.shape[1]),
+        "neighborsPerPanorama": int(indices.shape[1]) if offsets is None else None,
         "chunkRows": chunk_rows,
         "core": {
             "file": "core.json.gz",
@@ -196,6 +229,8 @@ def compile_map(manifest_path: Path, output_root: Path, chunk_rows: int) -> tupl
             if value
         ],
     }
+    if offsets is not None:
+        manifest["adaptiveNeighborhood"] = neighbor_summary
     boards_root = dataset_root / "trainer" / "portable-boards-v1"
     boards_manifest_path = boards_root / "manifest.json"
     if boards_manifest_path.is_file():
