@@ -53,10 +53,11 @@ async function main() {
     for (const mapIndex of indices) {
       const row = map.core.panoramas[mapIndex];
       const review = await api.request(
-        `/api/review?pano_id=${encodeURIComponent(row.p)}&map_key=${encodeURIComponent(entry.aliases.at(-1))}`,
+        `/api/neighborhood?pano_id=${encodeURIComponent(row.p)}&map_key=${encodeURIComponent(entry.aliases.at(-1))}`,
       );
       assert.equal(review.matched, true);
       assert.equal(review.location.mapIndex, mapIndex);
+      assert.equal("metas" in review, false, "active review path is similarity-only");
       assert.ok(review.visualNeighborhood.visualMatches.length >= 8);
       assert.ok(review.visualNeighborhood.visualMatches.length <= (
         map.manifest.neighborSummary?.counts?.maximum || 512
@@ -79,9 +80,6 @@ async function main() {
         assert.equal(review.visualNeighborhood.posterior.broadDistributionUsedForClick, true);
         assert.ok(review.visualNeighborhood.posterior.displayedMass > 0);
       }
-      assert.ok(review.location.views.every((url) => url.startsWith(
-        "https://streetviewpixels-pa.googleapis.com/v1/thumbnail?",
-      )));
       const recommendation = await api.request(
         `/api/neighborhood/${mapIndex}?dataset=${encodeURIComponent(entry.datasetKey)}`,
       );
