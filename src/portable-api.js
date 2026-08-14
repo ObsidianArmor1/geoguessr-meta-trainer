@@ -959,6 +959,9 @@
         const packed = lookup[mapIndex];
         const chunk = loaded.get(packed >>> 16);
         const local = packed & 0xffff;
+        if (chunk.mapIndices[local] !== mapIndex) {
+          throw new Error(`Corrupt projected-view lookup for panorama ${mapIndex}`);
+        }
         const start = local * 4 * descriptor.dimensions;
         return chunk.vectors.subarray(start, start + 4 * descriptor.dimensions);
       });
@@ -1019,7 +1022,7 @@
         slot: bestSlot,
         heading: row.h[bestSlot],
         view: streetViewThumbnail(row, bestSlot),
-        viewSimilarity: bestScore / (127 * 127),
+        viewSimilarity: clamp(bestScore / (127 * 127), -1, 1),
         distanceFromGuessKm: distances[candidate],
         candidatePool: pool.length,
         poolRadiusKm: distances[pool[pool.length - 1]],

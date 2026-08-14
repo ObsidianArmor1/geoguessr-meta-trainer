@@ -1,8 +1,10 @@
 // ==UserScript==
-// @name         GeoGuessr Visual Meta Trainer
-// @namespace    sightline-portable-meta-trainer
-// @version      2.0.0-beta.1
+// @name         GeoGuessr Meta Trainer
+// @namespace    sightline-orlando-meta
+// @version      2.0.0-beta.2
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
+// @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
+// @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
@@ -29,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.1";
+  const USERSCRIPT_VERSION = "2.0.0-beta.2";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
