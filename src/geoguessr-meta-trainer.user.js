@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.13
+// @version      2.0.0-beta.14
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.13";
+  const USERSCRIPT_VERSION = "2.0.0-beta.14";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -81,8 +81,9 @@
   const DEFAULT_MAP_COLORS = {
     neighborDots: "#ff334f",
     neighborClick: "#ff00a8",
-    guessDots: "#9b6cff",
+    guessDots: "#244cff",
   };
+  const LEGACY_GUESS_DOT_COLOR = "#9b6cff";
   const LIVE_CHALLENGE_PATH = /^\/(?:api\/)?live-challenge\/([^/?#]+)\/?$/;
   const PARTY_LOBBY_PATH = /^\/party\/lobby\/[^/?#]+\/?$/;
   const prewarmedRoundKeys = new Set();
@@ -180,10 +181,15 @@
   function readMapColorPreferences() {
     try {
       const stored = JSON.parse(localStorage.getItem(MAP_COLOR_STORAGE_KEY) || "null");
+      const storedGuessDots = normalizeColor(stored?.guessDots, DEFAULT_MAP_COLORS.guessDots);
       return {
         neighborDots: normalizeColor(stored?.neighborDots, DEFAULT_MAP_COLORS.neighborDots),
         neighborClick: normalizeColor(stored?.neighborClick, DEFAULT_MAP_COLORS.neighborClick),
-        guessDots: normalizeColor(stored?.guessDots, DEFAULT_MAP_COLORS.guessDots),
+        // Migrate only the former shipped default. Any genuinely customized
+        // color remains untouched.
+        guessDots: storedGuessDots === LEGACY_GUESS_DOT_COLOR
+          ? DEFAULT_MAP_COLORS.guessDots
+          : storedGuessDots,
       };
     } catch (_error) {
       return { ...DEFAULT_MAP_COLORS };
@@ -702,8 +708,8 @@
     .omt-legend-dot { display:inline-block; width:8px; height:8px; margin:0 4px 0 1px; border:1px solid #fff; border-radius:50%; background:#767981; }
     .omt-legend-match { display:inline-block; width:8px; height:8px; margin:0 4px 0 8px; border:1px solid #fff; border-radius:50%; vertical-align:-1px; }
     .omt-legend-round-match { background:var(--omt-neighbor-dot,#ff334f); }
-    .omt-legend-guess-match { background:var(--omt-guess-dot,#9b6cff); }
-    .omt-legend-shared-match { background:linear-gradient(90deg,var(--omt-neighbor-dot,#ff334f) 0 50%,var(--omt-guess-dot,#9b6cff) 50%); }
+    .omt-legend-guess-match { background:var(--omt-guess-dot,#244cff); }
+    .omt-legend-shared-match { background:linear-gradient(90deg,var(--omt-neighbor-dot,#ff334f) 0 50%,var(--omt-guess-dot,#244cff) 50%); }
     .omt-legend-current { display:inline-block; width:9px; height:9px; margin:0 4px 0 7px; border:2px solid #fff; border-radius:50%; background:#17181b; }
     .omt-legend-pin { position:relative; display:inline-block; width:10px; height:12px; margin:0 3px -2px 6px; border:1px solid #111; border-radius:7px 7px 7px 1px; background:#fff; transform:rotate(-45deg); }
     .omt-legend-pin::after { content:""; position:absolute; width:2px; height:2px; left:3px; top:3px; border-radius:50%; background:#111; }
