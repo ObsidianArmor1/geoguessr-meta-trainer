@@ -1,0 +1,26 @@
+# GeoGuessr Visual Meta Trainer
+
+Post-round visual study for these custom maps:
+
+- Balanced World 50k
+- Balanced USA 50k
+
+## Install
+
+1. Install [Tampermonkey](https://www.tampermonkey.net/).
+2. Open [the userscript](https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js).
+3. Press **Install**, then play either supported map normally.
+
+The review appears only after a round is over. `M` cycles the map overlays and
+`V` opens the visual-comparison board.
+
+## How it runs
+
+The expensive vision work is precomputed. On first use, the browser downloads
+the active map's compact lookup pack from this repository and caches it in
+IndexedDB. It does not download the original model, the training images, or the
+full model embeddings. Review thumbnails are requested live by panorama ID.
+
+No companion app, Python server, account, API key, LAN connection, or manual
+map selection is required. Learning history and assessment buttons remain
+local to the browser; this release has no analytics service.
