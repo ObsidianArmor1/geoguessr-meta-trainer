@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.12
+// @version      2.0.0-beta.13
 // @description  Post-round visual similarity and learned-meta review for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -31,7 +31,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.12";
+  const USERSCRIPT_VERSION = "2.0.0-beta.13";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -1497,14 +1497,14 @@
           : "outside the adaptive visual set";
         const label = `Best visual case near your guess · heading ${item.heading}°`;
         const detail = `${Number(item.viewSimilarity).toFixed(3)} view similarity · ${distance} from guess · ${rank}`;
-        return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" title="Shift + hover to enlarge · click to open in Google Maps"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess · ${item.heading}°</span><em>${esc(detail)}</em></button>`;
+        return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess · ${item.heading}°</span><em>${esc(detail)}</em></button>`;
       }
       const distance = item.distanceKm < 1
         ? `${Math.round(item.distanceKm * 1000)} m`
         : `${item.distanceKm.toFixed(1)} km`;
       const label = `Visual match #${item.rank} · heading ${item.heading}°${item.reciprocal ? " · mutual match" : ""}`;
       const detail = `${Number(item.viewSimilarity).toFixed(3)} view similarity · ${distance}`;
-      return `<button class="omt-board-match" data-board-entry="${item.mapIndex}" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" title="Shift + hover to enlarge · click to open in Google Maps"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Visual match ${item.rank}"><span>#${item.rank} · ${item.heading}°${item.reciprocal ? " · mutual" : ""}</span><em>${esc(detail)}</em></button>`;
+      return `<button class="omt-board-match" data-board-entry="${item.mapIndex}" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Visual match ${item.rank}"><span>#${item.rank} · ${item.heading}°${item.reciprocal ? " · mutual" : ""}</span><em>${esc(detail)}</em></button>`;
     }).join("");
     const interpretation = literal
       ? "Eight closest views, without filtering for agreement."
