@@ -18,6 +18,12 @@ visual neighborhood of the nearest stored panorama to the player's guess as
 filled violet points. Shared locations use a single split red/violet point, and
 the review reports their overlap.
 
+The match set is now selected per round from the shape of its ranked visual
+similarity curve. A boundary is shown only when the mean and median slope both
+change persistently; otherwise the review explicitly labels the nearest
+examples as diffuse instead of pretending that every panorama has a crisp
+visual meta.
+
 ## How it runs
 
 The expensive vision work is precomputed. On first use, the browser downloads
