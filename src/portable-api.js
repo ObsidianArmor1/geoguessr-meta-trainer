@@ -181,6 +181,7 @@
       this.weightedNeighborhoodPromises = new Map();
       this.reviewPromises = new Map();
       this.projectionChunkPromises = new Map();
+      this.panoramaProjectionPromises = new Map();
     }
 
     url(path) {
@@ -377,6 +378,116 @@
       return { indices, similarities };
     }
 
+    async panoramaProjection(map) {
+      const descriptor = map.manifest.panoramaProjection;
+      if (!descriptor) return null;
+      const key = map.entry.datasetKey;
+      if (!this.panoramaProjectionPromises.has(key)) {
+        this.panoramaProjectionPromises.set(key, (async () => {
+          let buffer = await this.asset(
+            `maps/${key}/panorama-projection/${descriptor.index.file}`,
+            descriptor.index.sha256,
+          );
+          buffer = await gunzip(buffer);
+          const view = new DataView(buffer);
+          const magic = textDecoder.decode(new Uint8Array(buffer, 0, 8));
+          const version = view.getUint32(8, true);
+          const panoramas = view.getUint32(12, true);
+          const dimensions = view.getUint32(16, true);
+          const quantizationScale = view.getFloat32(20, true);
+          if (magic !== "OMTPPJ01" || version !== 1
+              || panoramas !== map.core.panoramas.length
+              || dimensions !== descriptor.dimensions) {
+            throw new Error("Unsupported portable panorama projection");
+          }
+          const normOffset = 24;
+          const vectorOffset = normOffset + panoramas * 2;
+          return {
+            buffer, view, panoramas, dimensions, quantizationScale,
+            normOffset, vectorOffset, bytesPerRow: dimensions / 2,
+          };
+        })());
+      }
+      return this.panoramaProjectionPromises.get(key);
+    }
+
+    async prewarmMap(datasetKey) {
+      const map = await this.loadMap(datasetKey);
+      if (map.manifest.panoramaProjection) await this.panoramaProjection(map);
+      return map;
+    }
+
+    async projectedPosterior(map, mapIndex) {
+      const projection = await this.panoramaProjection(map);
+      if (!projection) return null;
+      const descriptor = map.manifest.panoramaProjection.posterior;
+      const { view, panoramas, dimensions, normOffset, vectorOffset, bytesPerRow } = projection;
+      const query = new Int8Array(dimensions);
+      const queryOffset = vectorOffset + mapIndex * bytesPerRow;
+      for (let packed = 0; packed < bytesPerRow; packed += 1) {
+        const value = view.getUint8(queryOffset + packed);
+        query[packed * 2] = (value & 15) - 7;
+        query[packed * 2 + 1] = (value >>> 4) - 7;
+      }
+      const queryNorm = Math.sqrt(view.getUint16(normOffset + mapIndex * 2, true));
+      const scores = new Float32Array(panoramas);
+      let maximum = -Infinity;
+      for (let row = 0; row < panoramas; row += 1) {
+        if (row === mapIndex) { scores[row] = -1; continue; }
+        const offset = vectorOffset + row * bytesPerRow;
+        let dot = 0;
+        for (let packed = 0; packed < bytesPerRow; packed += 1) {
+          const value = view.getUint8(offset + packed);
+          dot += query[packed * 2] * ((value & 15) - 7);
+          dot += query[packed * 2 + 1] * ((value >>> 4) - 7);
+        }
+        const norm = Math.sqrt(view.getUint16(normOffset + row * 2, true));
+        const score = dot / Math.max(queryNorm * norm, 1e-8);
+        scores[row] = score;
+        if (score > maximum) maximum = score;
+      }
+      const temperature = Number(descriptor.temperature || 0.02);
+      const weights = new Float32Array(panoramas);
+      let total = 0;
+      for (let row = 0; row < panoramas; row += 1) {
+        if (row === mapIndex) continue;
+        const weight = Math.exp((scores[row] - maximum) / temperature);
+        weights[row] = weight;
+        total += weight;
+      }
+      let squareSum = 0;
+      for (let row = 0; row < panoramas; row += 1) {
+        weights[row] /= total;
+        squareSum += weights[row] ** 2;
+      }
+      const order = Array.from({ length: panoramas }, (_value, index) => index)
+        .filter((index) => index !== mapIndex)
+        .sort((left, right) => weights[right] - weights[left]);
+      const maximumDots = Math.max(
+        8, Math.floor(panoramas * Number(descriptor.maximumDotFraction || 0.10)),
+      );
+      const displayMassTarget = Number(descriptor.displayMass || 0.90);
+      let displayMass = 0;
+      let displayCount = 0;
+      while (displayCount < order.length && displayCount < maximumDots
+          && displayMass < displayMassTarget) {
+        displayMass += weights[order[displayCount]];
+        displayCount += 1;
+      }
+      return {
+        scores,
+        weights,
+        displayIndices: order.slice(0, displayCount),
+        displayMass,
+        displayMassTarget,
+        displayCapped: displayCount === maximumDots && displayMass < displayMassTarget,
+        maximumDotFraction: Number(descriptor.maximumDotFraction || 0.10),
+        effectiveLocations: 1 / Math.max(squareSum, 1e-12),
+        maximumWeight: weights[order[0]],
+        temperature,
+      };
+    }
+
     calibratedWeights(map, indices, similarities) {
       const calibration = map.manifest.neighborCalibration;
       const knots = calibration.calibrationKnots;
@@ -447,11 +558,54 @@
     async computeNeighborhood(map, mapIndex) {
       const { indices, similarities } = await this.neighborRow(map, mapIndex);
       const origin = map.core.panoramas[mapIndex];
-      const strongest = similarities[0];
-      const weakest = similarities[similarities.length - 1];
+      let posterior = null;
+      if (map.manifest.panoramaProjection) {
+        try { posterior = await this.projectedPosterior(map, mapIndex); } catch (_error) {}
+      }
+      let displayIndices = Array.from(indices);
+      if (posterior) {
+        const seen = new Set(displayIndices);
+        for (const index of posterior.displayIndices) {
+          if (!seen.has(index)) { displayIndices.push(index); seen.add(index); }
+        }
+        displayIndices = displayIndices.slice(
+          0,
+          Math.max(8, Math.floor(
+            map.core.panoramas.length * posterior.maximumDotFraction,
+          )),
+        );
+      }
+      const displaySimilarities = posterior
+        ? displayIndices.map((index) => posterior.scores[index])
+        : Array.from(similarities);
+      const strongest = displaySimilarities[0];
+      const weakest = displaySimilarities[displaySimilarities.length - 1];
       const span = Math.max(strongest - weakest, 1e-8);
       const calibrated = this.calibratedWeights(map, indices, similarities);
-      const visualMatches = Array.from(indices, (neighborIndex, position) => {
+      if (posterior) {
+        const coreWeight = Number(
+          map.manifest.panoramaProjection.posterior.exactCoreWeight ?? 0.50,
+        );
+        const broadWeight = 1 - coreWeight;
+        posterior.clickWeights = Float32Array.from(
+          posterior.weights, (weight) => weight * broadWeight,
+        );
+        for (let position = 0; position < indices.length; position += 1) {
+          posterior.clickWeights[indices[position]] += (
+            coreWeight * calibrated.normalized[position]
+          );
+        }
+        let clickSquareSum = 0;
+        let clickMaximum = 0;
+        for (const weight of posterior.clickWeights) {
+          clickSquareSum += weight ** 2;
+          clickMaximum = Math.max(clickMaximum, weight);
+        }
+        posterior.clickEffectiveLocations = 1 / Math.max(clickSquareSum, 1e-12);
+        posterior.clickMaximumWeight = clickMaximum;
+        posterior.exactCoreWeight = coreWeight;
+      }
+      const visualMatches = displayIndices.map((neighborIndex, position) => {
         const row = map.core.panoramas[neighborIndex];
         return {
           datasetKey: map.entry.datasetKey,
@@ -460,10 +614,12 @@
           rank: position + 1,
           latitude: row.a,
           longitude: row.o,
-          similarity: similarities[position],
-          relativeStrength: clamp((similarities[position] - weakest) / span, 0, 1),
-          posteriorWeight: calibrated.normalized[position],
-          geographicGroup: calibrated.groupIds[position],
+          similarity: displaySimilarities[position],
+          relativeStrength: clamp((displaySimilarities[position] - weakest) / span, 0, 1),
+          posteriorWeight: posterior
+            ? posterior.weights[neighborIndex]
+            : calibrated.normalized[position],
+          geographicGroup: posterior ? -1 : calibrated.groupIds[position],
           distanceKm: haversineKm(origin.a, origin.o, row.a, row.o),
         };
       });
@@ -489,7 +645,9 @@
       const sortedDistances = visualMatches.map((row) => row.distanceKm).sort((a, b) => a - b);
       const quantile = (fraction) => sortedDistances[Math.floor((sortedDistances.length - 1) * fraction)];
       const result = {
-        representation: "raw C-RADIOv4-H fused panorama embedding",
+        representation: posterior
+          ? "map-wide quantized C-RADIOv4-H projection with exact-neighbor core"
+          : "raw C-RADIOv4-H fused panorama embedding",
         neighbors: visualMatches.length,
         mapDiagonalKm: map.projection.diagonalKm,
         coordinateBlind: true,
@@ -498,10 +656,28 @@
         medianDistanceKm: quantile(0.5),
         nearestTenthDistanceKm: quantile(0.1),
         similarityRange: { strongest, weakest },
+        posterior: posterior ? {
+          mapLocations: map.core.panoramas.length - 1,
+          effectiveLocations: posterior.effectiveLocations,
+          displayedLocations: visualMatches.length,
+          displayedMass: displayIndices.reduce(
+            (sum, index) => sum + posterior.weights[index], 0,
+          ),
+          targetDisplayedMass: posterior.displayMassTarget,
+          displayCapped: displayIndices.length >= Math.floor(
+            map.core.panoramas.length * posterior.maximumDotFraction,
+          ) && displayIndices.reduce(
+            (sum, index) => sum + posterior.weights[index], 0,
+          ) < posterior.displayMassTarget,
+          maximumDotFraction: posterior.maximumDotFraction,
+          semanticMaximumFraction: null,
+          temperature: posterior.temperature,
+          exactCoreWeight: posterior.exactCoreWeight,
+        } : null,
         weightedClick: null,
         visualMatches,
       };
-      return { result, indices, calibrated };
+      return { result, indices, calibrated, posterior };
     }
 
     async neighborhood(map, mapIndex, includeWeightedClick) {
@@ -514,17 +690,106 @@
         if (!this.weightedNeighborhoodPromises.has(key)) {
           this.weightedNeighborhoodPromises.set(key, Promise.resolve().then(() => ({
             ...computed.result,
-            weightedClick: this.optimizeWeightedClick(
-              map,
-              computed.indices,
-              computed.calibrated,
-            ),
+            weightedClick: computed.posterior
+              ? this.optimizePosteriorClick(map, computed.posterior)
+              : this.optimizeWeightedClick(map, computed.indices, computed.calibrated),
           })));
         }
         return this.weightedNeighborhoodPromises.get(key);
       }
       const result = { ...computed.result };
       return result;
+    }
+
+    optimizePosteriorClick(map, posterior) {
+      const binsAcross = 32;
+      const binsDown = 32;
+      const bins = binsAcross * binsDown;
+      const mass = new Float64Array(bins);
+      const sphereX = new Float64Array(bins);
+      const sphereY = new Float64Array(bins);
+      const sphereZ = new Float64Array(bins);
+      let latitudeMinimum = Infinity;
+      let latitudeMaximum = -Infinity;
+      let longitudeSin = 0;
+      let longitudeCos = 0;
+      for (const row of map.core.panoramas) {
+        latitudeMinimum = Math.min(latitudeMinimum, row.a);
+        latitudeMaximum = Math.max(latitudeMaximum, row.a);
+        longitudeSin += Math.sin(row.o * Math.PI / 180);
+        longitudeCos += Math.cos(row.o * Math.PI / 180);
+      }
+      const longitudeCenter = Math.atan2(longitudeSin, longitudeCos) * 180 / Math.PI;
+      const longitudeDeltas = map.core.panoramas.map((row) => (
+        ((row.o - longitudeCenter + 540) % 360) - 180
+      ));
+      let longitudeMinimum = Infinity;
+      let longitudeMaximum = -Infinity;
+      for (const value of longitudeDeltas) {
+        longitudeMinimum = Math.min(longitudeMinimum, value);
+        longitudeMaximum = Math.max(longitudeMaximum, value);
+      }
+      const latitudeSpan = Math.max(latitudeMaximum - latitudeMinimum, 1e-8);
+      const longitudeSpan = Math.max(longitudeMaximum - longitudeMinimum, 1e-8);
+      for (let index = 0; index < map.core.panoramas.length; index += 1) {
+        const weight = (posterior.clickWeights || posterior.weights)[index];
+        if (!weight) continue;
+        const point = map.core.panoramas[index];
+        const column = Math.min(binsAcross - 1, Math.max(
+          0, Math.floor((longitudeDeltas[index] - longitudeMinimum) / longitudeSpan * binsAcross),
+        ));
+        const row = Math.min(binsDown - 1, Math.max(
+          0, Math.floor((point.a - latitudeMinimum) / latitudeSpan * binsDown),
+        ));
+        const bin = row * binsAcross + column;
+        const latitude = point.a * Math.PI / 180;
+        const longitude = point.o * Math.PI / 180;
+        mass[bin] += weight;
+        sphereX[bin] += weight * Math.cos(latitude) * Math.cos(longitude);
+        sphereY[bin] += weight * Math.cos(latitude) * Math.sin(longitude);
+        sphereZ[bin] += weight * Math.sin(latitude);
+      }
+      const targets = [];
+      for (let bin = 0; bin < bins; bin += 1) {
+        if (mass[bin] <= 0) continue;
+        const longitude = Math.atan2(sphereY[bin], sphereX[bin]);
+        const latitude = Math.atan2(
+          sphereZ[bin], Math.hypot(sphereX[bin], sphereY[bin]),
+        );
+        targets.push([latitude * 180 / Math.PI, longitude * 180 / Math.PI, mass[bin]]);
+      }
+      const sigma = map.manifest.neighborCalibration.posteriorSettings.locationUncertaintySigmaKm;
+      const expected = (point) => {
+        let score = 0;
+        for (const target of targets) {
+          score += target[2] * this.scoreDistance(
+            haversineKm(point[0], point[1], target[0], target[1]),
+            map.projection.diagonalKm,
+            sigma,
+          );
+        }
+        return score;
+      };
+      let best = targets[0];
+      let expectedScore = -Infinity;
+      for (const target of targets) {
+        const score = expected(target);
+        if (score > expectedScore) { best = target; expectedScore = score; }
+      }
+      return {
+        latitude: best[0],
+        longitude: best[1],
+        expectedScore,
+        effectiveNeighbors: posterior.clickEffectiveLocations || posterior.effectiveLocations,
+        maximumWeight: posterior.clickMaximumWeight || posterior.maximumWeight,
+        minimumWeight: 0,
+        smoothingSigmaKm: sigma,
+        geographicGroups: targets.length,
+        effectiveGeographicGroups: targets.length,
+        largestGeographicGroupWeight: Math.max(...targets.map((target) => target[2])),
+        spatialDeduplicationRadiusKm: null,
+        weighting: "uncapped map-wide visual posterior blended with the exact visual core and aggregated to a deterministic geographic grid",
+      };
     }
 
     scoreDistance(distanceKm, diagonalKm, sigmaKm) {

@@ -1,38 +1,53 @@
 # Adaptive visual neighborhoods
 
-The public trainer no longer treats rank 100 as a semantic boundary. It first
-retrieves 512 visual candidates from the coordinate-blind C-RADIOv4-H fused
-panorama embeddings, then retains a variable number using symmetric,
-self-tuning cosine distance:
+The public trainer does not treat either rank 100 or a percentage of the map
+as a semantic boundary. It now has two complementary visual layers.
+
+## Exact core
+
+The 3,840-dimensional C-RADIOv4-H panorama embeddings first retrieve 512 exact
+visual candidates. A symmetric, self-tuning distance identifies the strongest
+core:
 
 ```text
 (2 - 2*cosine(i,j)) / sqrt(scale(i) * scale(j)) <= 1.10
 ```
 
-`scale(i)` is panorama `i`'s distance to its 64th visual neighbor. Using both
-endpoints' local scales prevents a dense, common appearance and a rare,
-isolated appearance from sharing an arbitrary raw-similarity cutoff. Location
-is not used during retrieval or selection. A minimum of eight neighbors keeps
-the recommendation and comparison UI defined for the tiny fraction of rows
-whose natural cutoff is smaller.
+`scale(i)` is panorama `i`'s distance to its 64th visual neighbor. The exact
+core ranges from 8–273 locations on Balanced World and 8–285 on Balanced USA.
+It remains the source for precise nearest-neighbor ranks and the V comparison.
 
-## Resulting size spectrum
+## Uncapped map-wide posterior
 
-| Map | Minimum | p10 | Median | p90 | Maximum | Above 100 |
+Every panorama also has a 512-dimensional signed-int4 random projection of the
+fused embedding. The complete index is roughly 10.2 MB for each 50k map. The
+browser scores the revealed panorama against every other map location and
+forms a softmax posterior at temperature 0.02.
+
+The recommended click blends the exact core and the uncapped map-wide
+posterior at equal weight. All non-query map locations therefore contribute;
+there is no semantic maximum. The exact half protects the high-quality nearest
+ranks from projection noise, while the broad half prevents generic looks from
+becoming falsely precise. For the dot layer, the browser shows the strongest
+locations until it has displayed 90% of the broad visual weight. Individual
+dots stop at 10% of the map for readability; this display limit does not remove
+the remaining posterior mass from the click calculation.
+
+On deterministic 1,000-panorama diagnostics, the number of displayed dots had
+the following distribution:
+
+| Map | p1 | p10 | Median | p90 | p99 | Rows needing 10% cap |
 |---|---:|---:|---:|---:|---:|---:|
-| Balanced World 50k | 8 | 49 | 92 | 138 | 273 | 40.3% |
-| Balanced USA 50k | 8 | 46 | 93 | 145 | 285 | 42.3% |
+| Balanced World 50k | 16 | 113 | 635 | 1,712 | 2,777 | 0.0% |
+| Balanced USA 50k | 69 | 362 | 1,846 | 3,766 | 5,011 | 1.2% |
 
-Only 77 World rows and 141 USA rows need the eight-neighbor operational floor.
-The deeper HNSW retrieval audit measured 100.0% World recall and 99.95% USA
-recall at the former rank-100 boundary; recall across all 512 candidates was
-99.98% and 99.95%, respectively.
+The int4 projection retains approximately 84% and 81% of the original exact
+Top-100 neighbors on World and USA. It does not replace the exact core; its job
+is to model the broader visual range compactly. Coordinates are opened only
+after visual scoring, when the posterior is aggregated into geographic cells
+for the recommended click.
 
-On a deterministic 1,200-panorama diagnostic sample per map, the adaptive
-recommendation preserved the fixed-100 score level: 3,947 vs 3,963 average
-points on World and 3,406 vs 3,402 on USA. This score check opens coordinates
-only after visual selection; it does not alter neighborhood membership.
-
-The portable `OMTNBR02` format stores row offsets plus flat neighbor and
-similarity arrays, so the browser downloads only the chunk containing the
-current panorama while supporting a different count for every row.
+To keep broad rounds responsive, dots are painted on one canvas and hover
+targets use a fixed pool of at most 1,000 reusable elements rather than one DOM
+element per displayed panorama. The map-wide index is downloaded and cached
+during the round.

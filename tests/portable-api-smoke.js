@@ -29,7 +29,15 @@ async function main() {
       assert.equal(review.matched, true);
       assert.equal(review.location.mapIndex, mapIndex);
       assert.ok(review.visualNeighborhood.visualMatches.length >= 8);
-      assert.ok(review.visualNeighborhood.visualMatches.length <= 512);
+      assert.ok(review.visualNeighborhood.visualMatches.length <= Math.ceil(
+        entry.panoramas * 0.10,
+      ));
+      if (map.manifest.panoramaProjection) {
+        assert.equal(review.visualNeighborhood.posterior.mapLocations, entry.panoramas - 1);
+        assert.equal(review.visualNeighborhood.posterior.semanticMaximumFraction, null);
+        assert.equal(review.visualNeighborhood.posterior.exactCoreWeight, 0.5);
+        assert.ok(review.visualNeighborhood.posterior.displayedMass > 0);
+      }
       assert.ok(review.location.views.every((url) => url.startsWith(
         "https://streetviewpixels-pa.googleapis.com/v1/thumbnail?",
       )));

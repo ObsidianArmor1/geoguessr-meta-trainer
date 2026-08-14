@@ -287,6 +287,27 @@ def compile_map(manifest_path: Path, output_root: Path, chunk_rows: int) -> tupl
             )
         }
         manifest["viewProjection"]["chunks"] = projection_chunks
+    panorama_projection_root = dataset_root / "trainer" / "portable-panorama-projection-v1"
+    panorama_projection_manifest_path = panorama_projection_root / "manifest.json"
+    if panorama_projection_manifest_path.is_file():
+        descriptor = json.loads(panorama_projection_manifest_path.read_text())
+        source = panorama_projection_root / descriptor["index"]["file"]
+        public_projection = destination / "panorama-projection"
+        public_projection.mkdir(parents=True, exist_ok=True)
+        target = public_projection / source.name
+        shutil.copyfile(source, target)
+        manifest["panoramaProjection"] = {
+            key: descriptor[key]
+            for key in (
+                "format", "version", "panoramas", "sourceDimensions",
+                "dimensions", "seed", "method", "quantizationScale", "posterior",
+            )
+        }
+        manifest["panoramaProjection"]["index"] = {
+            "file": target.name,
+            "bytes": target.stat().st_size,
+            "sha256": sha256(target),
+        }
     manifest_path_out = destination / "manifest.json"
     write_json(manifest_path_out, manifest)
     return {
