@@ -28,18 +28,13 @@ The recommended click blends the exact core and the uncapped map-wide
 posterior at equal weight. All non-query map locations therefore contribute;
 there is no semantic maximum. The exact half protects the high-quality nearest
 ranks from projection noise, while the broad half prevents generic looks from
-becoming falsely precise. For the dot layer, the browser shows the strongest
-locations until it has displayed 90% of the broad visual weight. Individual
-dots stop at 10% of the map for readability; this display limit does not remove
-the remaining posterior mass from the click calculation.
+becoming falsely precise.
 
-On deterministic 1,000-panorama diagnostics, the number of displayed dots had
-the following distribution:
-
-| Map | p1 | p10 | Median | p90 | p99 | Rows needing 10% cap |
-|---|---:|---:|---:|---:|---:|---:|
-| Balanced World 50k | 16 | 113 | 635 | 1,712 | 2,777 | 0.0% |
-| Balanced USA 50k | 69 | 362 | 1,846 | 3,766 | 5,011 | 1.2% |
+The dot layer deliberately does **not** draw the posterior's weak long tail.
+It shows only the exact adaptive core: 8–273 locations on Balanced World
+(median 92) and 8–285 on Balanced USA (median 93). This keeps every visible
+point useful as a concrete visual example while the much broader uncertainty
+distribution still contributes to the recommended click.
 
 The int4 projection retains approximately 84% and 81% of the original exact
 Top-100 neighbors on World and USA. It does not replace the exact core; its job
@@ -47,7 +42,5 @@ is to model the broader visual range compactly. Coordinates are opened only
 after visual scoring, when the posterior is aggregated into geographic cells
 for the recommended click.
 
-To keep broad rounds responsive, dots are painted on one canvas and hover
-targets use a fixed pool of at most 1,000 reusable elements rather than one DOM
-element per displayed panorama. The map-wide index is downloaded and cached
-during the round.
+Dots are painted on one canvas and hover targets use a fixed reusable element
+pool. The map-wide index is downloaded and cached during the round.

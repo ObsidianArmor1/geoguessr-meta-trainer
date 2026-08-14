@@ -106,8 +106,7 @@ def build(
             "method": "map-wide softmax over projected cosine similarity",
             "temperature": 0.02,
             "exactCoreWeight": 0.50,
-            "displayMass": 0.90,
-            "maximumDotFraction": 0.10,
+            "displayPolicy": "exact adaptive core",
             "semanticMaximumFraction": None,
         },
         "index": {
