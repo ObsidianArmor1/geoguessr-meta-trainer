@@ -35,9 +35,13 @@ the round, and searches that corpus locally. The arbitrary-map path sends no
 image or embedding to a query server. Assets are cached in IndexedDB and review
 thumbnails are requested live by panorama ID.
 
-The universal pilot publishes FP32 WebGPU query graphs for current Chromium
-compatibility. The equivalent FP16 graphs are preserved as source artifacts,
-but current ONNX Runtime WebGPU rejects their mixed `f32 * f16` shader path.
+The universal pilot publishes FP32 query graphs. Chrome and Edge on macOS use
+WebGPU and are the recommended fast path. Browsers without ONNX Runtime WebGPU
+support, including Firefox, use a tested single-thread WASM compatibility path;
+it produces the same retrieval but currently takes roughly 12–14 seconds per
+panorama on the development Mac instead of roughly 3 seconds. The equivalent
+FP16 graphs are preserved as source artifacts, but current ONNX Runtime WebGPU
+rejects their mixed `f32 * f16` shader path.
 
 The World 50K corpus is a first pilot, not a claim of universal geographic
 coverage. Its purpose is to make the existing similarity workflow usable on

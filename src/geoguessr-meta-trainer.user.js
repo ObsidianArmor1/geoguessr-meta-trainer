@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.1.0-beta.1
+// @version      2.1.0-beta.2
 // @description  Browser-local post-round visual similarity learning for any Street View map.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -35,13 +35,16 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.1.0-beta.1";
+  const USERSCRIPT_VERSION = "2.1.0-beta.2";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
       url,
       responseType: "arraybuffer",
-      timeout: 30000,
+      // The first arbitrary-map run downloads two browser models. GitHub's
+      // raw-file throughput can occasionally take longer than 30 seconds on
+      // otherwise healthy connections; do not turn that into a false outage.
+      timeout: 120000,
       onload: (response) => {
         if (response.status >= 200 && response.status < 300) resolve(response.response);
         else reject(new Error(`Portable trainer returned ${response.status}`));
@@ -141,6 +144,7 @@
     visualBoardOpen: false,
     visualBoardModifierCleanup: null,
     offlineRetryTimer: 0,
+    pendingTimer: 0,
     liveChallengeResultVisible: false,
     liveChallengeLastRoundKey: "",
     liveChallengePendingKey: "",
@@ -620,6 +624,8 @@
     .omt-dock-count { display:inline-grid; place-items:center; min-width:19px; height:19px; margin-left:7px; padding:0 5px; border-radius:999px; color:#111216; background:#e7e8eb; font-size:10px; }
     .omt-dock-status { min-height:40px; display:flex; align-items:center; padding:8px 12px; color:#b7b9bf; }
     .omt-dock-status::before { content:""; width:7px; height:7px; margin-right:8px; border-radius:50%; background:#c97a64; }
+    .omt-dock-status.pending::before { background:#71a7ff; animation:omt-pulse 1.1s ease-in-out infinite alternate; }
+    @keyframes omt-pulse { to { opacity:.32; } }
     .omt-dock-settings { position:relative; display:flex; align-items:stretch; border-left:1px solid var(--line); }
     .omt-dock-settings summary { display:flex; align-items:center; min-height:40px; padding:8px 12px; color:#d9dbe0; cursor:pointer; font-weight:650; list-style:none; }
     .omt-dock-settings summary::-webkit-details-marker { display:none; }
@@ -1003,7 +1009,12 @@
 
   function renderOffline(message) {
     ensureRoot();
-    state.shadow.innerHTML = `<style>${styles}</style><div class="omt"><div class="omt-dock"><div class="omt-dock-status" title="${esc(message)}">Trainer data unavailable</div></div></div>`;
+    state.shadow.innerHTML = `<style>${styles}</style><div class="omt"><div class="omt-dock"><div class="omt-dock-status" title="${esc(message)}">${esc(message || "Trainer data unavailable")}</div></div></div>`;
+  }
+
+  function renderPending(message = "Analyzing visual similarity…") {
+    ensureRoot();
+    state.shadow.innerHTML = `<style>${styles}</style><div class="omt"><div class="omt-dock"><div class="omt-dock-status pending">${esc(message)}</div></div></div>`;
   }
 
   function bindUi() {
@@ -2697,6 +2708,8 @@
   }
 
   function clearRound() {
+    clearTimeout(state.pendingTimer);
+    state.pendingTimer = 0;
     flushVisualExposure("next-round");
     state.requestToken += 1;
     state.review = null;
@@ -3041,6 +3054,7 @@
 
   async function handleRoundEnd(eventState) {
     clearTimeout(state.offlineRetryTimer);
+    clearTimeout(state.pendingTimer);
     const token = ++state.requestToken;
     const rounds = eventState?.rounds || [];
     const round = rounds[rounds.length - 1];
@@ -3073,11 +3087,21 @@
     if (Number.isFinite(roundDistanceM)) params.set("round_distance_m", roundDistanceM);
     // Retry the latency-critical similarity payload quietly at 100 ms and
     // 200 ms before displaying a transient data-download failure.
+    state.pendingTimer = window.setTimeout(() => {
+      if (token === state.requestToken && !state.review) {
+        renderPending("Analyzing visual similarity…");
+      }
+    }, 250);
     const reviewRequest = criticalRequest(`/api/neighborhood?${params}`);
     try {
       const review = await reviewRequest;
+      clearTimeout(state.pendingTimer);
+      state.pendingTimer = 0;
       if (token !== state.requestToken) return;
-      if (!review.matched) return;
+      if (!review.matched) {
+        renderOffline("This round did not expose a Street View panorama");
+        return;
+      }
       state.review = review;
       state.roundIdentity = buildRoundIdentity(eventState, round, review);
       state.fastNeighborhood = null;
@@ -3098,6 +3122,8 @@
       applyStoredMapMode(token);
       loadNeighborRecommendation(token);
     } catch (error) {
+      clearTimeout(state.pendingTimer);
+      state.pendingTimer = 0;
       if (token === state.requestToken) {
         renderOffline(error.message);
         state.offlineRetryTimer = setTimeout(() => {
