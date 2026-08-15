@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.1.0-beta.4
+// @version      2.1.0-beta.5
 // @description  Browser-local post-round visual similarity learning for any Street View map.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -35,7 +35,13 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.1.0-beta.4";
+  const USERSCRIPT_VERSION = "2.1.0-beta.5";
+  // ONNX Runtime's classic browser bundle declares `var ort` in the shared
+  // userscript wrapper. Tampermonkey does not necessarily reflect that lexical
+  // binding onto `globalThis`, while the separately required universal module
+  // resolves dependencies through `globalThis`. Bridge the two explicitly.
+  const browserVisionRuntime = typeof ort !== "undefined" ? ort : globalThis.ort;
+  if (browserVisionRuntime && !globalThis.ort) globalThis.ort = browserVisionRuntime;
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
