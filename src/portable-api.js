@@ -183,6 +183,15 @@
       this.projectionChunkPromises = new Map();
       this.panoramaProjectionPromises = new Map();
       this.boundaryPromises = new Map();
+      this.universal = root.OMTUniversalSimilarity
+        ? new root.OMTUniversalSimilarity({
+          baseUrl: this.baseUrl,
+          asset: this.asset.bind(this),
+          json: this.json.bind(this),
+          transport: this.transport,
+          registry: this.registry.bind(this),
+        })
+        : null;
     }
 
     url(path) {
@@ -455,6 +464,269 @@
       const map = await this.loadMap(datasetKey);
       if (map.manifest.panoramaProjection) await this.panoramaProjection(map);
       return map;
+    }
+
+    async prewarmUniversal() {
+      if (!this.universal) throw new Error("Universal visual search did not load");
+      return this.universal.prewarm();
+    }
+
+    universalWeights(count) {
+      const weights = Float64Array.from(
+        { length: count }, (_value, index) => 1 / Math.sqrt(index + 1),
+      );
+      const total = weights.reduce((sum, value) => sum + value, 0);
+      for (let index = 0; index < weights.length; index += 1) weights[index] /= total;
+      return weights;
+    }
+
+    universalBoundary(matches) {
+      const window = 12;
+      const lower = 16;
+      const upper = Math.min(288, matches.length - window - 1);
+      if (upper <= lower) {
+        return { detected: false, count: Math.min(100, matches.length), score: 0, qualifyingRuns: 0 };
+      }
+      const values = matches.map((match) => Math.log(Math.max(1 - match.similarity, 1e-8)));
+      const gaps = values.slice(1).map((value, index) => value - values[index]);
+      const median = (items) => {
+        const sorted = [...items].sort((left, right) => left - right);
+        const middle = sorted.length >> 1;
+        return sorted.length % 2
+          ? sorted[middle]
+          : (sorted[middle - 1] + sorted[middle]) / 2;
+      };
+      const candidates = [];
+      for (let rank = lower; rank <= upper; rank += 1) {
+        const before = gaps.slice(rank - window, rank);
+        const after = gaps.slice(rank, rank + window);
+        const beforeMean = before.reduce((sum, value) => sum + value, 0) / window;
+        const afterMean = after.reduce((sum, value) => sum + value, 0) / window;
+        const meanRatio = afterMean / Math.max(beforeMean, 1e-9);
+        const medianRatio = median(after) / Math.max(median(before), 1e-9);
+        candidates.push({ rank, score: Math.min(meanRatio, medianRatio) });
+      }
+      const hits = candidates.map((row, index) => row.score >= 3 ? index : -1)
+        .filter((index) => index >= 0);
+      if (!hits.length) {
+        return { detected: false, count: Math.min(100, matches.length), score: 0, qualifyingRuns: 0 };
+      }
+      let qualifyingRuns = 1;
+      for (let index = 1; index < hits.length; index += 1) {
+        if (hits[index] > hits[index - 1] + 1) qualifyingRuns += 1;
+      }
+      const start = hits[0];
+      let stop = start + 1;
+      while (stop < candidates.length && candidates[stop].score >= 3) stop += 1;
+      let selected = candidates[start];
+      for (let index = start + 1; index < stop; index += 1) {
+        if (candidates[index].score > selected.score) selected = candidates[index];
+      }
+      return {
+        detected: true,
+        count: selected.rank,
+        score: selected.score,
+        qualifyingRuns,
+        method: "persistent slope change on browser-local OPQ similarity",
+      };
+    }
+
+    async universalBoard(map, query, visualMatches, latitude, longitude) {
+      const entries = await Promise.all(visualMatches.slice(0, 8).map(async (match) => {
+        let slot = 0;
+        try {
+          const source = await this.visualBoardSource(map, match.mapIndex);
+          const mode = source.m.find((item) => item.i === source.d) || source.m[0];
+          if (Number.isInteger(mode?.c)) slot = mode.c;
+        } catch (_error) {}
+        const row = map.core.panoramas[match.mapIndex];
+        return {
+          ...match,
+          slot,
+          heading: row.h[slot],
+          view: streetViewThumbnail(row, slot),
+          viewSimilarity: match.similarity,
+          reciprocal: false,
+        };
+      }));
+      const independentAreas = new Set(entries.map((entry) => (
+        `${Math.round(entry.latitude * 2) / 2}:${Math.round(entry.longitude * 2) / 2}`
+      ))).size;
+      const strongest = entries[0]?.similarity || 0;
+      const weakest = entries[entries.length - 1]?.similarity || strongest;
+      const agreement = clamp(1 - Math.max(0, strongest - weakest), 0, 1);
+      return {
+        datasetKey: map.entry.datasetKey,
+        mapIndex: -1,
+        universal: true,
+        panoId: query.panoId,
+        neighborsConsidered: visualMatches.length,
+        defaultMode: "literal",
+        warning: "Visual agreement is evidence, not proof of a geographic meta.",
+        queryLocation: { latitude, longitude },
+        modes: [{
+          id: "literal",
+          label: "Nearest 8",
+          currentSlot: 0,
+          currentHeading: query.headings[0],
+          currentView: query.viewUrls[0],
+          support: entries.length,
+          weightedSupport: entries.length,
+          coherence: agreement,
+          alignment: agreement,
+          reciprocalSupport: 0,
+          independentAreas,
+          entries,
+        }],
+      };
+    }
+
+    async universalReview(
+      panoId, latitude, longitude, sourceMapKey, roundScore = null, roundDistanceM = null,
+    ) {
+      if (!this.universal || !panoId) return null;
+      const descriptor = await this.universal.descriptor();
+      const map = await this.loadMap(descriptor.datasetKey || "balanced-world-50k");
+      const query = await this.universal.query(panoId, [0, 90, 180, 270], 500);
+      const ranked = query.matches.filter((match) => match.panoId !== panoId);
+      const boundary = this.universalBoundary(ranked);
+      const candidates = ranked.slice(0, boundary.count);
+      if (!candidates.length) return null;
+      const strongest = candidates[0].similarity;
+      const weakest = candidates[candidates.length - 1].similarity;
+      const span = Math.max(strongest - weakest, 1e-8);
+      const normalized = this.universalWeights(candidates.length);
+      const indices = Int32Array.from(candidates.map((match) => match.mapIndex));
+      const calibrated = {
+        normalized,
+        groupIds: Int32Array.from({ length: candidates.length }, (_value, index) => index),
+        details: {
+          absoluteTopMatchConfidence: null,
+          geographicGroups: candidates.length,
+          effectiveGeographicGroups: 1 / normalized.reduce(
+            (sum, value) => sum + value ** 2, 0,
+          ),
+          largestGeographicGroupWeight: Math.max(...normalized),
+          spatialDeduplicationRadiusKm: null,
+        },
+      };
+      const visualMatches = candidates.map((match, position) => ({
+        datasetKey: map.entry.datasetKey,
+        mapIndex: match.mapIndex,
+        panoId: match.panoId,
+        rank: position + 1,
+        latitude: match.latitude,
+        longitude: match.longitude,
+        similarity: match.similarity,
+        relativeStrength: clamp((match.similarity - weakest) / span, 0, 1),
+        posteriorWeight: normalized[position],
+        geographicGroup: position,
+        distanceKm: Number.isFinite(latitude) && Number.isFinite(longitude)
+          ? haversineKm(latitude, longitude, match.latitude, match.longitude)
+          : null,
+      }));
+      const score = Number(roundScore);
+      const distanceKm = Number(roundDistanceM) / 1000;
+      const inferredDiagonalKm = Number.isFinite(score) && score > 0 && score < 5000
+          && Number.isFinite(distanceKm) && distanceKm > 0
+        ? -10 * distanceKm / Math.log(score / 5000)
+        : null;
+      const mapDiagonalKm = Number.isFinite(inferredDiagonalKm) && inferredDiagonalKm > 0
+        ? inferredDiagonalKm
+        : map.projection.diagonalKm;
+      const scoringMap = mapDiagonalKm === map.projection.diagonalKm
+        ? map
+        : { ...map, projection: { ...map.projection, diagonalKm: mapDiagonalKm } };
+      const allDistances = Number.isFinite(latitude) && Number.isFinite(longitude)
+        ? map.core.panoramas.map((row) => haversineKm(latitude, longitude, row.a, row.o))
+        : [];
+      const radii = this.localityRadii(mapDiagonalKm).map((radiusKm) => {
+        const matches = visualMatches.filter((row) => (
+          Number.isFinite(row.distanceKm) && row.distanceKm <= radiusKm
+        )).length;
+        const mapLocations = allDistances.filter((distance) => distance <= radiusKm).length;
+        const expected = visualMatches.length * mapLocations
+          / Math.max(map.core.panoramas.length, 1);
+        const bits = Math.log2((matches + 0.5) / (expected + 0.5));
+        return {
+          radiusKm, matches, mapLocations,
+          densityAdjustedRatio: 2 ** bits,
+          densityAdjustedBits: bits,
+        };
+      });
+      const distances = visualMatches.map((row) => row.distanceKm)
+        .filter(Number.isFinite).sort((left, right) => left - right);
+      const quantile = (fraction) => distances.length
+        ? distances[Math.floor((distances.length - 1) * fraction)]
+        : null;
+      const visualNeighborhood = {
+        representation: "browser-local DINOv2/DINOv3 ensemble against the World 50K pilot corpus",
+        neighbors: visualMatches.length,
+        mapDiagonalKm,
+        coordinateBlind: true,
+        universal: true,
+        corpusLabel: query.corpusLabel,
+        boundary,
+        radii,
+        radiusProfile: "world-scale",
+        medianDistanceKm: quantile(0.5),
+        nearestTenthDistanceKm: quantile(0.1),
+        similarityRange: { strongest, weakest },
+        posterior: {
+          mapLocations: map.core.panoramas.length,
+          effectiveLocations: 1 / normalized.reduce((sum, value) => sum + value ** 2, 0),
+          displayedLocations: visualMatches.length,
+          displayedMass: 1,
+          displayPolicy: boundary.detected
+            ? "persistent similarity-curve boundary in the World 50K pilot corpus"
+            : "diffuse nearest references; no sustained similarity boundary",
+          broadDistributionUsedForClick: false,
+          semanticMaximumFraction: null,
+          temperature: null,
+          exactCoreWeight: 1,
+        },
+        weightedClick: this.optimizeWeightedClick(scoringMap, indices, calibrated),
+        visualMatches,
+      };
+      const visualBoard = await this.universalBoard(
+        map, query, visualMatches, latitude, longitude,
+      );
+      return {
+        matched: true,
+        universal: true,
+        datasetKey: map.entry.datasetKey,
+        datasetDisplayName: `${query.corpusLabel} · arbitrary-map query`,
+        sourceMapKey,
+        matchMethod: "browser-visual-query",
+        matchDistanceM: null,
+        location: {
+          mapIndex: -1,
+          panoId,
+          latitude,
+          longitude,
+          headings: query.headings,
+          views: query.viewUrls,
+        },
+        reviewSummary: {
+          rawDetectorMatches: 0,
+          conceptMatches: 0,
+          strongConceptMatches: 0,
+          shown: 0,
+          fallbackUsed: false,
+          hiddenRedundantMatches: 0,
+          hiddenWeakMatches: 0,
+          hiddenByAttentionBudget: 0,
+          hiddenNearDuplicates: 0,
+          minimumExemplarPercentile: null,
+          maximumClues: 0,
+          scheduledLessons: 0,
+        },
+        universalTiming: query.timing,
+        visualNeighborhood,
+        visualBoard,
+        metas: [],
+        moreMetas: [],
+      };
     }
 
     async projectedPosterior(map, mapIndex) {
@@ -1482,7 +1754,19 @@
           Number.isFinite(latitude) ? latitude : null,
           Number.isFinite(longitude) ? longitude : null,
         );
-        if (!resolved) return { matched: false, matchMethod: "unmatched", datasetKey: datasetHint };
+        if (!resolved) {
+          const universal = await this.universalReview(
+            url.searchParams.get("pano_id"),
+            Number.isFinite(latitude) ? latitude : null,
+            Number.isFinite(longitude) ? longitude : null,
+            datasetHint,
+            url.searchParams.get("round_score"),
+            url.searchParams.get("round_distance_m"),
+          );
+          return universal || {
+            matched: false, matchMethod: "unmatched", datasetKey: datasetHint,
+          };
+        }
         if (url.pathname === "/api/review") {
           const reviewKey = `${resolved.map.entry.datasetKey}:${resolved.mapIndex}`;
           if (!this.reviewPromises.has(reviewKey)) {

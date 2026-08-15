@@ -1,1 +1,42 @@
-{"format":"geoguessr-portable-meta-registry","version":1,"generatedAt":"2026-08-14T21:22:41.448866+00:00","maps":[{"datasetKey":"balanced-world-50k","displayName":"Balanced World 50k","panoramas":49417,"manifest":"maps/balanced-world-50k/manifest.json","aliases":["balanced-world-50k","6a7d99296a64847f955da936"],"manifestSha256":"0f5399cde3a191a664f4b4d949fa90fec92b0300e08f2d66e679992b94e2d297"},{"datasetKey":"balanced-usa-50k","displayName":"Balanced USA 50k","panoramas":49440,"manifest":"maps/balanced-usa-50k/manifest.json","aliases":["balanced-usa-50k","6a7d9951e250d15ffed33065"],"manifestSha256":"802476f5ff55a5d8ea91c5d49869c0db8cf19988463b4338268540e4defca2ee"}],"routing":{"file":"routing.json.gz","bytes":2017658,"sha256":"79420e1354ac0e90ab1ed104a50e5f20102cda9f5e23c2fd563c2df609e56c20","panoramaIds":98844}}
+{
+  "format": "geoguessr-portable-meta-registry",
+  "generatedAt": "2026-08-14T21:22:41.448866+00:00",
+  "maps": [
+    {
+      "aliases": [
+        "balanced-world-50k",
+        "6a7d99296a64847f955da936"
+      ],
+      "datasetKey": "balanced-world-50k",
+      "displayName": "Balanced World 50k",
+      "manifest": "maps/balanced-world-50k/manifest.json",
+      "manifestSha256": "0f5399cde3a191a664f4b4d949fa90fec92b0300e08f2d66e679992b94e2d297",
+      "panoramas": 49417
+    },
+    {
+      "aliases": [
+        "balanced-usa-50k",
+        "6a7d9951e250d15ffed33065"
+      ],
+      "datasetKey": "balanced-usa-50k",
+      "displayName": "Balanced USA 50k",
+      "manifest": "maps/balanced-usa-50k/manifest.json",
+      "manifestSha256": "802476f5ff55a5d8ea91c5d49869c0db8cf19988463b4338268540e4defca2ee",
+      "panoramas": 49440
+    }
+  ],
+  "routing": {
+    "bytes": 2017658,
+    "file": "routing.json.gz",
+    "panoramaIds": 98844,
+    "sha256": "79420e1354ac0e90ab1ed104a50e5f20102cda9f5e23c2fd563c2df609e56c20"
+  },
+  "universalCorpus": {
+    "datasetKey": "balanced-world-50k",
+    "label": "Balanced World 50K pilot corpus",
+    "manifest": "universal/world50k-browser-v1/manifest.json",
+    "manifestSha256": "bb4325fecf3a1e49650f3b26fcdf36bb5e629333a8057348687f4fa8ed67d4cc",
+    "panoramas": 49416
+  },
+  "version": 1
+}
