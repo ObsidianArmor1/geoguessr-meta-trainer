@@ -1,0 +1,43 @@
+{
+  "route": "/live-challenge/public-game",
+  "resultSelector": "[class*=\"result-map_roundPin\"]",
+  "profile": { "user": { "id": "public-player" } },
+  "payload": {
+    "options": { "mapSlug": "6a7d99296a64847f955da936" },
+    "currentRoundNumber": 2,
+    "rounds": [
+      {
+        "question": {
+          "panoramaQuestionPayload": {
+            "panorama": { "panoId": "old-pano", "lat": 1, "lng": 2 }
+          }
+        }
+      },
+      {
+        "question": {
+          "panoramaQuestionPayload": {
+            "panorama": {
+              "panoId": "6c6976652d70616e6f2d7075626c69632d31323334353637383930",
+              "lat": 28.538336,
+              "lng": -81.379234
+            }
+          }
+        },
+        "playerGuess": { "lat": 27.950575, "lng": -82.457178 },
+        "score": { "amount": 4123 },
+        "distance": { "meters": { "amount": 124567 } },
+        "time": 18.4
+      }
+    ]
+  },
+  "expected": {
+    "challengeId": "public-game",
+    "mapId": "6a7d99296a64847f955da936",
+    "roundNumber": 2,
+    "panoId": "live-pano-public-1234567890",
+    "guess": { "lat": 27.950575, "lng": -82.457178 },
+    "score": 4123,
+    "distanceMeters": 124567,
+    "timeSeconds": 18.4
+  }
+}
