@@ -1,6 +1,6 @@
 # GeoGuessr Visual Meta Trainer
 
-Post-round visual study for these custom maps:
+Browser-local post-round visual study. These maps have full precomputed packs:
 
 - [Balanced World 50k](https://www.geoguessr.com/maps/6a7d99296a64847f955da936)
 - [Balanced USA 50k](https://www.geoguessr.com/maps/6a7d9951e250d15ffed33065)
@@ -9,7 +9,7 @@ Post-round visual study for these custom maps:
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/).
 2. Open [the userscript](https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js).
-3. Press **Install**, then play either supported map normally.
+3. Press **Install**, then play a Street View map normally.
 
 The review appears only after a round is over. `M` toggles the similarity map,
 `G` toggles the guess comparison, and `V` opens the visual-comparison board.
@@ -28,10 +28,21 @@ visual meta.
 
 ## How it runs
 
-The expensive vision work is precomputed. On first use, the browser downloads
-the active map's compact lookup pack from this repository and caches it in
-IndexedDB. It does not download the original model, the training images, or the
-full model embeddings. Review thumbnails are requested live by panorama ID.
+Balanced World and Balanced USA use their map-specific precomputed lookup
+packs. On other maps, the browser downloads two compact vision encoders plus a
+compressed Balanced World reference corpus, embeds the revealed panorama after
+the round, and searches that corpus locally. The arbitrary-map path sends no
+image or embedding to a query server. Assets are cached in IndexedDB and review
+thumbnails are requested live by panorama ID.
+
+The universal pilot publishes FP32 WebGPU query graphs for current Chromium
+compatibility. The equivalent FP16 graphs are preserved as source artifacts,
+but current ONNX Runtime WebGPU rejects their mixed `f32 * f16` shader path.
+
+The World 50K corpus is a first pilot, not a claim of universal geographic
+coverage. Its purpose is to make the existing similarity workflow usable on
+unseen maps while the much larger, deliberately balanced reference corpus is
+built and validated.
 
 No companion app, Python server, account, API key, LAN connection, or manual
 map selection is required. Local learning state remains in the browser; this

@@ -1,18 +1,21 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.18
-// @description  Post-round visual similarity learning for supported GeoGuessr maps.
+// @version      2.1.0-beta.1
+// @description  Browser-local post-round visual similarity learning for any Street View map.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
+// @require      https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.webgpu.min.js
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/universal-similarity.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_openInTab
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
+// @connect      cdn.jsdelivr.net
 // @connect      streetviewpixels-pa.googleapis.com
 // @updateURL    https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js
 // @downloadURL  https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js
@@ -32,7 +35,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.18";
+  const USERSCRIPT_VERSION = "2.1.0-beta.1";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -147,6 +150,7 @@
     roundIdentity: null,
     visualExposure: null,
     finalizedExposureKeys: new Set(),
+    universalPrewarmPromise: null,
   };
 
   function readFeedback() {
@@ -270,7 +274,18 @@
     // The 50k-location core is the largest cold-start cost. Begin downloading
     // and parsing it when play starts instead of after the guess is submitted.
     portableApi.prewarmMap(datasetKey).catch(() => {
-      // Unsupported maps are normal; the trainer remains dormant on them.
+      // On an unseen map, prepare the location-free browser models and static
+      // World pilot corpus. Geographic search still waits for round end.
+      if (!state.universalPrewarmPromise) {
+        const begin = () => portableApi.prewarmUniversal().catch((error) => {
+          console.warn("Meta Trainer: universal corpus prewarm failed", error);
+        }).finally(() => { state.universalPrewarmPromise = null; });
+        state.universalPrewarmPromise = new Promise((resolve) => {
+          const run = () => Promise.resolve(begin()).finally(resolve);
+          if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 5000 });
+          else window.setTimeout(run, 1500);
+        });
+      }
     });
   }
 
@@ -305,7 +320,7 @@
     if (panoId) params.set("pano_id", panoId);
     if (Number.isFinite(latitude)) params.set("lat", latitude);
     if (Number.isFinite(longitude)) params.set("lng", longitude);
-    request(`/api/neighborhood?${params}`).then(async (review) => {
+    portableApi.prewarmMap(datasetKey).then(() => request(`/api/neighborhood?${params}`)).then(async (review) => {
       if (!review?.matched) return;
       const dataset = encodeURIComponent(review.datasetKey);
       const mapIndex = review.location.mapIndex;
@@ -317,8 +332,9 @@
       // Decode them opportunistically so opening V remains immediate.
       await warmVisualBoard(board);
     }).catch(() => {
-      // Prewarming is an optimization. The ordinary post-round retry path
-      // remains authoritative if a connection drops while the round is live.
+      // Unknown maps may prewarm models and corpus, but do not search geographic
+      // reference data until the round is verifiably over.
+      warmMapForRound({ mapId: datasetKey });
     });
   }
 
@@ -832,7 +848,7 @@
     const mode = review.visualNeighborhood
       ? `<button id="omt-mode-cycle" title="Toggle similarity map">${mapModeLabel()} <kbd>M</kbd></button>`
       : "";
-    const guess = review.visualNeighborhood
+    const guess = review.visualNeighborhood && !review.universal
       ? `<button id="omt-guess-cycle" class="${state.showGuessNeighbors ? "active" : ""}" title="Compare the visual neighborhood near your guess with the revealed location" ${state.playerGuess ? "" : "disabled"}>Guess ${state.showGuessNeighbors ? "on" : "off"} <kbd>G</kbd></button>`
       : "";
     const settings = review.visualNeighborhood
@@ -1044,6 +1060,7 @@
   }
 
   function setGuessComparison(enabled) {
+    if (state.review?.universal) return;
     state.showGuessNeighbors = Boolean(enabled);
     saveMapLayerPreferences();
     if (state.showGuessNeighbors && !state.showVisualNeighbors) {
@@ -1093,7 +1110,7 @@
       event.preventDefault();
       event.stopPropagation();
       if (state.visualBoardOpen) closeVisualBoard(); else openVisualBoard();
-    } else if (event.code === "KeyG" && state.playerGuess) {
+    } else if (event.code === "KeyG" && state.playerGuess && !state.review.universal) {
       event.preventDefault();
       event.stopPropagation();
       setGuessComparison(!state.showGuessNeighbors);
@@ -1672,6 +1689,14 @@
       return state.visualBoardPromise;
     }
     state.visualBoardKey = key;
+    if (state.review?.universal && state.review.visualBoard) {
+      state.visualBoard = state.review.visualBoard;
+      state.visualBoardMode = state.visualBoard.defaultMode || "literal";
+      state.visualBoardWarmPromise = warmVisualBoard(state.visualBoard).catch((error) => {
+        console.warn("Meta Trainer: could not preload universal board images", error);
+      });
+      return Promise.resolve(state.visualBoard);
+    }
     const query = new URLSearchParams();
     if (datasetKey) query.set("dataset", datasetKey);
     if (playerGuess) {
@@ -1756,9 +1781,14 @@
     if (!tooltip?.isConnected || tooltip.dataset.nativeRequested === "true") return;
     tooltip.dataset.nativeRequested = "true";
     try {
-      const datasetKey = point.datasetKey || state.review?.datasetKey;
-      const map = await portableApi.loadMap(datasetKey);
-      const row = map.core.panoramas[Number(point.mapIndex)];
+      let row;
+      if (point.current && point.panoId && Array.isArray(point.headings)) {
+        row = { p: point.panoId, h: point.headings };
+      } else {
+        const datasetKey = point.datasetKey || state.review?.datasetKey;
+        const map = await portableApi.loadMap(datasetKey);
+        row = map.core.panoramas[Number(point.mapIndex)];
+      }
       if (!row || !tooltip.isConnected || state.matchTooltip !== tooltip) return;
       const host = tooltip.querySelector(".omt-match-tooltip-images");
       if (!host) return;
@@ -1836,9 +1866,11 @@
     state.matchTooltipPoint = point;
     if (state.matchTooltipShift) ensureMatchTooltipHighResolution(tooltip, point);
     try {
-      const urls = await Promise.all([0, 1, 2, 3].map((slot) =>
-        imageUrl(`/api/view/${point.mapIndex}/${slot}${viewSuffix(point)}`)
-      ));
+      const urls = point.current && Array.isArray(point.viewUrls)
+        ? point.viewUrls
+        : await Promise.all([0, 1, 2, 3].map((slot) =>
+          imageUrl(`/api/view/${point.mapIndex}/${slot}${viewSuffix(point)}`)
+        ));
       if (token !== state.matchTooltipToken || !tooltip.isConnected) return;
       const imageLabel = point.current
         ? "This round"
@@ -2592,6 +2624,8 @@
           lat: context.location.latitude,
           lng: context.location.longitude,
           datasetKey: context.datasetKey,
+          headings: context.location.headings,
+          viewUrls: context.location.views,
         },
       });
       if (neighbors) state.overlays.push(neighbors);
@@ -2893,6 +2927,14 @@
       if (liveRound.location.panoId) params.set("pano_id", liveRound.location.panoId);
       if (Number.isFinite(liveRound.location.lat)) params.set("lat", liveRound.location.lat);
       if (Number.isFinite(liveRound.location.lng)) params.set("lng", liveRound.location.lng);
+      // Only precompute a location-specific result when this is one of the
+      // legacy preindexed maps. Unknown maps use the universal encoder, whose
+      // geographic search must wait until the result is public.
+      try {
+        await portableApi.prewarmMap(liveRound.mapId);
+      } catch (_error) {
+        return;
+      }
       const review = await request(`/api/neighborhood?${params}`);
       if (!review?.matched) return;
       const dataset = encodeURIComponent(review.datasetKey);
@@ -3025,6 +3067,10 @@
     if (Number.isFinite(round.location.lat)) params.set("lat", round.location.lat);
     if (Number.isFinite(round.location.lng)) params.set("lng", round.location.lng);
     if (datasetKey) params.set("map_key", datasetKey);
+    const roundScore = Number(round.score?.amount);
+    const roundDistanceM = Number(round.distance?.meters?.amount);
+    if (Number.isFinite(roundScore)) params.set("round_score", roundScore);
+    if (Number.isFinite(roundDistanceM)) params.set("round_distance_m", roundDistanceM);
     // Retry the latency-critical similarity payload quietly at 100 ms and
     // 200 ms before displaying a transient data-download failure.
     const reviewRequest = criticalRequest(`/api/neighborhood?${params}`);

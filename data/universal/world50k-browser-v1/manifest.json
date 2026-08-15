@@ -1,0 +1,128 @@
+{
+  "assets": {
+    "centroids": {
+      "bytes": 1572864,
+      "file": "pq-centroids.f32.bin",
+      "sha256": "fea6d74c300a1014e731518b746bcca7121abcb335d4a656b6c5518c008fd99f"
+    },
+    "codes": {
+      "bytes": 9487872,
+      "file": "codes.u8.bin",
+      "sha256": "4ebfc8a9e62a1b81e861fc2b5d3fdbddb8548550f7f458be821c95c2095996ec"
+    },
+    "core": {
+      "bytes": 1878721,
+      "file": "core.json.gz",
+      "sha256": "c95c32113e1148a2c43b5e444bf4a3851530cf64242591ed2278adaf46d02c0b"
+    },
+    "eigenvalues": {
+      "bytes": 6144,
+      "file": "eigenvalues.f32.bin",
+      "sha256": "039ce7f01bdf7c06343e5b6e2d8cb7f4874d045a08f2c2a1936a988207503657"
+    },
+    "eigenvectors": {
+      "bytes": 9437184,
+      "file": "eigenvectors.f32.bin",
+      "sha256": "408916108a2603aaa6261b1f686189c54f4bf57aafbeb851a66460d2bcbb5289"
+    },
+    "indices": {
+      "bytes": 197664,
+      "file": "map-indices.i32.bin",
+      "sha256": "c7434ac2ddd42ea0da7f30e038f97175aafb66589dd126170ae85aabf4766ca8"
+    },
+    "mean": {
+      "bytes": 6144,
+      "file": "mean.f32.bin",
+      "sha256": "5d460f50c429c275b5153cbbf3cba8bc8e649a18a3bd356e9a030a8ecbeb540d"
+    },
+    "opqBias": {
+      "bytes": 6144,
+      "file": "opq-bias.f32.bin",
+      "sha256": "fd9243e1ba57263ed469c3bdbd7ade6ec5254e7ed924a9f5737fa44749933cc0"
+    },
+    "opqRotation": {
+      "bytes": 9437184,
+      "file": "opq-rotation.f32.bin",
+      "sha256": "486100171bb64e82bffa4581204e7689ad852b39f3439c0565fad72e851115b9"
+    },
+    "scales": {
+      "bytes": 6144,
+      "file": "scales.f32.bin",
+      "sha256": "752d77cec1b2aab398a17c9a9a380fb292226561eee95a3bb35d92eabf995e7d"
+    }
+  },
+  "build": {
+    "dino2": "/content/dino2-complete",
+    "dino3": "/content/dino3-complete",
+    "seconds": 143.2743358580001
+  },
+  "corpus": {
+    "coreRows": 49417,
+    "id": "balanced-world-50k-browser-v1",
+    "label": "Balanced World 50K pilot corpus",
+    "mapIndexAligned": true,
+    "rows": 49416
+  },
+  "format": "geoguessr-browser-universal-opq",
+  "generatedAt": "2026-08-15T15:59:39+00:00",
+  "opq": {
+    "bits": 8,
+    "centroidLayout": "subquantizer, centroid, dimension",
+    "codeLayout": "row, subquantizer",
+    "metric": "inner_product",
+    "subquantizers": 192,
+    "subvectorDimensions": 8,
+    "trainingRows": 49416,
+    "trainingSeconds": 136.72944325599974
+  },
+  "query": {
+    "dimensions": 1536,
+    "dino2Weight": 0.75,
+    "dino3Weight": 0.25,
+    "headings": [
+      0,
+      90,
+      180,
+      270
+    ],
+    "models": {
+      "dino2": {
+        "bytes": 88323954,
+        "file": "models/dinov2s-fused-fp32-v1.onnx",
+        "inputHeight": 252,
+        "inputWidth": 448,
+        "outputDimensions": 768,
+        "precision": "fp32",
+        "sha256": "c9b30d9943c317d9bb006cfea1868939917a486bde269ebc90cba112fa28f3eb"
+      },
+      "dino3": {
+        "bytes": 86682068,
+        "file": "models/dinov3s-fused-fp32-v1.onnx",
+        "inputHeight": 256,
+        "inputWidth": 448,
+        "outputDimensions": 768,
+        "precision": "fp32",
+        "sha256": "dbbfc6bc8651ed02f80275e4712f50f18ed2544ed472f3f5e6ca315f62390599"
+      }
+    },
+    "normalizationMean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "normalizationStd": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "thumbnailFov": 90
+  },
+  "transform": {
+    "matrixLayout": "row-major; projected = centered row-vector @ eigenvectors",
+    "opqLayout": "row-major Faiss LinearTransform; output = input @ A.T + bias",
+    "removedTopComponents": 4,
+    "whiteningExponent": 0.375,
+    "whiteningFloor": 1.1204051588720176e-06
+  },
+  "version": 1
+}
