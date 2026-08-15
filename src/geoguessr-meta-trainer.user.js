@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.1.0-beta.2
+// @version      2.1.0-beta.3
 // @description  Browser-local post-round visual similarity learning for any Street View map.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.webgpu.min.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/universal-similarity.js
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/universal-similarity.js?v=2.1.0-beta.3
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js
 // @grant        GM_xmlhttpRequest
@@ -35,7 +35,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.1.0-beta.2";
+  const USERSCRIPT_VERSION = "2.1.0-beta.3";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
