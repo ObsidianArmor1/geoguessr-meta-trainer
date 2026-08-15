@@ -103,6 +103,7 @@
       this.json = options.json;
       this.transport = options.transport;
       this.registry = options.registry;
+      this.executionProviders = options.executionProviders || null;
       this.loadedPromise = null;
       this.sessionsPromise = null;
       this.queryPromises = new Map();
@@ -201,17 +202,21 @@
           }
           if (ort.env?.wasm) {
             ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/";
+            // GeoGuessr is not cross-origin isolated, so browser WASM cannot
+            // use shared-memory threads. Be explicit and avoid a failed
+            // multi-thread initialization before the single-thread fallback.
+            ort.env.wasm.numThreads = 1;
           }
-          if (!navigator.gpu) {
-            throw new Error("WebGPU is required for arbitrary-map visual search");
-          }
+          const chromium = /(?:Chrome|Chromium|CriOS|Edg|OPR)\//.test(navigator.userAgent);
+          const providers = this.executionProviders
+            || (navigator.gpu && chromium ? ["webgpu"] : ["wasm"]);
           const models = data.manifest.query.models;
           const loadModel = async (description) => {
             const path = data.prefix ? `${data.prefix}/${description.file}` : description.file;
             try {
               const buffer = await this.asset(path, description.sha256 || description.file);
               return await ort.InferenceSession.create(new Uint8Array(buffer), {
-                executionProviders: ["webgpu"], graphOptimizationLevel: "all",
+                executionProviders: providers, graphOptimizationLevel: "all",
               });
             } catch (error) {
               throw new Error(`Universal model failed to load: ${description.file} (${String(error)})`);
@@ -221,7 +226,7 @@
           // a much larger transient spike beside an active Street View round.
           const dino2 = await loadModel(models.dino2);
           const dino3 = await loadModel(models.dino3);
-          return { dino2, dino3 };
+          return { dino2, dino3, providers };
         })().catch((error) => {
           this.sessionsPromise = null;
           throw error;
@@ -322,7 +327,11 @@
           raw[index] = dino2Scale * dino2[index];
           raw[dino2.length + index] = dino3Scale * dino3[index];
         }
-        return { vector: unit(raw), viewUrls: images.urls };
+        return {
+          vector: unit(raw),
+          viewUrls: images.urls,
+          executionProvider: sessions.providers[0],
+        };
       } finally {
         images.bitmaps.forEach((bitmap) => bitmap.close());
       }
@@ -407,6 +416,7 @@
           transformMs: transformedDone - inferenceDone,
           searchMs: performance.now() - transformedDone,
         },
+        executionProvider: embedded.executionProvider,
       };
     }
 
