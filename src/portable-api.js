@@ -471,6 +471,16 @@
       return this.universal.prewarm();
     }
 
+    async precomputeUniversalRound(
+      panoId, headings = [0, 90, 180, 270], count = 500,
+    ) {
+      if (!this.universal) throw new Error("Universal visual search did not load");
+      // UniversalSimilarity memoizes this exact query promise. Starting it
+      // during play therefore makes the post-round request a cache lookup,
+      // without exposing any answer-derived UI before the round is over.
+      return this.universal.query(panoId, headings, count);
+    }
+
     universalWeights(count) {
       const weights = Float64Array.from(
         { length: count }, (_value, index) => 1 / Math.sqrt(index + 1),
