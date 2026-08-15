@@ -227,6 +227,14 @@
       return this.registryPromise;
     }
 
+    async isKnownMap(datasetKey) {
+      if (!datasetKey) return false;
+      const registry = await this.registry();
+      return registry.maps.some((item) => (
+        item.datasetKey === datasetKey || item.aliases?.includes(datasetKey)
+      ));
+    }
+
     async routing() {
       if (!this.routingPromise) {
         this.routingPromise = this.registry().then((registry) => this.json(

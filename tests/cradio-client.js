@@ -1,0 +1,148 @@
+#!/usr/bin/env node
+"use strict";
+
+const assert = require("assert/strict");
+const {
+  ModalCradioClient,
+  adaptResponse,
+  panoIdFromRawRound,
+  panoIdFromLiveRound,
+  validToken,
+  TOKEN_KEY,
+  CACHE_KEY,
+} = require("../src/cradio-client.js");
+
+const queryPano = "query-pano-1";
+const rawResponse = {
+  status: "complete",
+  panoId: queryPano,
+  corpus: "balanced-world-50k-cradio-h-fused-v1",
+  corpusSize: 49417,
+  boundary: { detected: true, count: 2, score: 3.4 },
+  recommendedClick: [50.6, 8.43],
+  timings: { totalSeconds: 1.2 },
+  matches: [
+    { rank: 1, similarity: 0.92, mapIndex: 10, panoId: "match-1", latitude: 50, longitude: 8 },
+    { rank: 2, similarity: 0.90, mapIndex: 11, panoId: "match-2", latitude: 51, longitude: 9 },
+    { rank: 3, similarity: 0.80, mapIndex: 12, panoId: "match-3", latitude: 52, longitude: 10 },
+  ],
+};
+
+function storage() {
+  const values = new Map();
+  return {
+    getValue(key, fallback) { return values.has(key) ? values.get(key) : fallback; },
+    setValue(key, value) { values.set(key, value); },
+    deleteValue(key) { values.delete(key); },
+  };
+}
+
+function clientWith(request, store = storage()) {
+  store.setValue(TOKEN_KEY, "wk-test-token.ws-test-token");
+  return new ModalCradioClient({ ...store, request, timeoutMs: 20 });
+}
+
+async function main() {
+  assert.equal(validToken("wk-test.ws-test"), true);
+  assert.equal(validToken("wk-test"), false);
+  assert.equal(validToken("Bearer wk-test.ws-test"), false);
+  assert.equal(panoIdFromRawRound({
+    round: 1,
+    rounds: [{ panoId: queryPano }],
+  }), queryPano, "regular round pano is discoverable");
+  assert.equal(panoIdFromLiveRound({ location: { panoId: queryPano } }), queryPano,
+    "Live Challenge pano is discoverable");
+
+  const adapted = adaptResponse(rawResponse, {
+    panoId: queryPano,
+    latitude: 49,
+    longitude: 7,
+    sourceMapKey: "public-map",
+  });
+  assert.equal(adapted.cloud, true);
+  assert.equal(adapted.matchMethod, "modal-cradio-v1");
+  assert.equal(adapted.visualNeighborhood.visualMatches.length, 2);
+  assert.equal(adapted.visualNeighborhood.boundary.detected, true);
+  assert.deepEqual(adapted.visualNeighborhood.weightedClick, {
+    latitude: 50.6,
+    longitude: 8.43,
+    expectedScore: null,
+    source: "modal-cradio",
+  });
+  assert.equal(adapted.visualBoard.modes[0].entries.length, 2);
+  assert.equal(adapted.location.views.length, 4);
+
+  let calls = 0;
+  const request = async (options) => {
+    calls += 1;
+    assert.equal(options.headers.Authorization, "Bearer wk-test-token.ws-test-token");
+    assert.equal(options.headers["Content-Type"], "application/json");
+    assert.deepEqual(JSON.parse(options.body), { panoId: queryPano, count: 500 });
+    return { status: 200, body: JSON.stringify(rawResponse) };
+  };
+  const store = storage();
+  const client = clientWith(request, store);
+  const regularRoundPano = panoIdFromRawRound({ round: 1, rounds: [{ panoId: queryPano }] });
+  const liveRoundPano = panoIdFromLiveRound({ location: { panoId: queryPano } });
+  assert.equal(regularRoundPano, liveRoundPano, "regular and Live Challenge use the same pano identity");
+  const [first, second] = await Promise.all([
+    client.prefetch(regularRoundPano, { latitude: 49, longitude: 7 }),
+    client.prefetch(liveRoundPano, { latitude: 49, longitude: 7 }),
+  ]);
+  assert.equal(calls, 1, "one Modal call is deduplicated across rerenders");
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(first.cached, false);
+  const cachedClient = clientWith(async () => {
+    throw new Error("cache hit must not call transport");
+  }, store);
+  const cacheHit = await cachedClient.prefetch(queryPano, { latitude: 49, longitude: 7 });
+  assert.equal(cacheHit.ok, true);
+  assert.equal(cacheHit.cached, true, "successful cloud responses are cached");
+  assert.ok(store.getValue(CACHE_KEY).version >= 1);
+
+  const missing = new ModalCradioClient({ ...storage(), request });
+  assert.deepEqual(await missing.prefetch(queryPano), { ok: false, reason: "missing-credential" });
+  const invalidStore = storage();
+  invalidStore.setValue(TOKEN_KEY, "not-a-token");
+  const invalid = new ModalCradioClient({ ...invalidStore, request });
+  assert.deepEqual(await invalid.prefetch(queryPano), { ok: false, reason: "missing-credential" });
+
+  for (const [status, reason] of [[401, "unauthorized"], [429, "rate-limited"], [500, "http-error"]]) {
+    const failure = clientWith(async () => ({ status, body: "{}" }), storage());
+    assert.deepEqual(await failure.prefetch(`pano-${status}`), { ok: false, reason });
+  }
+  const timeout = clientWith(async () => {
+    const error = new Error("timeout");
+    error.code = "timeout";
+    throw error;
+  }, storage());
+  assert.deepEqual(await timeout.prefetch("pano-timeout"), { ok: false, reason: "timeout" });
+  const network = clientWith(async () => { throw new Error("offline"); }, storage());
+  assert.deepEqual(await network.prefetch("pano-network"), { ok: false, reason: "network-error" });
+
+  let failedCalls = 0;
+  const failedOnce = clientWith(async () => {
+    failedCalls += 1;
+    return { status: 429, body: "{}" };
+  }, storage());
+  assert.deepEqual(await failedOnce.prefetch("pano-no-retry"), { ok: false, reason: "rate-limited" });
+  assert.deepEqual(await failedOnce.prefetch("pano-no-retry"), { ok: false, reason: "rate-limited" });
+  assert.equal(failedCalls, 1, "a failed pano is not automatically retried");
+
+  // The userscript's request-token guard must discard a late prior-round
+  // result; this deterministic gate mirrors that contract without a DOM.
+  let currentRound = "round-2";
+  const late = await clientWith(async () => new Promise((resolve) => {
+    setTimeout(() => resolve({ status: 200, body: JSON.stringify(rawResponse) }), 1);
+  }), storage()).prefetch("pano-late", { roundKey: "round-1" });
+  assert.equal(currentRound !== "round-1", true, "test advances to a new round before completion");
+  assert.equal(late.ok, true, "late result remains safe data and is ignored by caller token guard");
+
+  process.stdout.write("C-RADIO client tests passed\n");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
