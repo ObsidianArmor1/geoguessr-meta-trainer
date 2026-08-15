@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.1.0-beta.5
+// @version      2.1.0-beta.6
 // @description  Browser-local post-round visual similarity learning for any Street View map.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -35,7 +35,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.1.0-beta.5";
+  const USERSCRIPT_VERSION = "2.1.0-beta.6";
   // ONNX Runtime's classic browser bundle declares `var ort` in the shared
   // userscript wrapper. Tampermonkey does not necessarily reflect that lexical
   // binding onto `globalThis`, while the separately required universal module
@@ -342,9 +342,17 @@
       // Decode them opportunistically so opening V remains immediate.
       await warmVisualBoard(board);
     }).catch(() => {
-      // Unknown maps may prewarm models and corpus, but do not search geographic
-      // reference data until the round is verifiably over.
-      warmMapForRound({ mapId: datasetKey });
+      // Unknown maps have no precomputed row to fetch. Compute the exact
+      // universal query privately during play; UniversalSimilarity retains the
+      // promise/result, so post-round review reuses it instead of starting the
+      // browser models after the guess. No trainer UI is shown here.
+      if (panoId) {
+        portableApi.precomputeUniversalRound(panoId).catch((error) => {
+          console.warn("Meta Trainer: during-round universal analysis failed", error);
+        });
+      } else {
+        warmMapForRound({ mapId: datasetKey });
+      }
     });
   }
 
@@ -2946,12 +2954,15 @@
       if (liveRound.location.panoId) params.set("pano_id", liveRound.location.panoId);
       if (Number.isFinite(liveRound.location.lat)) params.set("lat", liveRound.location.lat);
       if (Number.isFinite(liveRound.location.lng)) params.set("lng", liveRound.location.lng);
-      // Only precompute a location-specific result when this is one of the
-      // legacy preindexed maps. Unknown maps use the universal encoder, whose
-      // geographic search must wait until the result is public.
+      // Preindexed maps use their precomputed row. On any other map, privately
+      // compute and cache the universal query now so the Live Challenge result
+      // screen does not pay browser-inference latency.
       try {
         await portableApi.prewarmMap(liveRound.mapId);
       } catch (_error) {
+        if (liveRound.location.panoId) {
+          await portableApi.precomputeUniversalRound(liveRound.location.panoId);
+        }
         return;
       }
       const review = await request(`/api/neighborhood?${params}`);
