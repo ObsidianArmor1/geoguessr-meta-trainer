@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.1.0-beta.6
+// @version      2.1.0-beta.7
 // @description  Browser-local post-round visual similarity learning for any Street View map.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -11,12 +11,18 @@
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/f1006b4177886b80a3921ccc27030dd9f3a9721b/src/universal-similarity.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
+// @grant        GM_registerMenuCommand
 // @grant        GM_openInTab
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
 // @connect      cdn.jsdelivr.net
 // @connect      streetviewpixels-pa.googleapis.com
+// @connect      obsidianarmor1--geoguessr-cradio-pilot-v1-pilot-query.modal.run
 // @updateURL    https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js
 // @downloadURL  https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js
 // @run-at       document-start
@@ -35,7 +41,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.1.0-beta.6";
+  const USERSCRIPT_VERSION = "2.1.0-beta.7";
   // ONNX Runtime's classic browser bundle declares `var ort` in the shared
   // userscript wrapper. Tampermonkey does not necessarily reflect that lexical
   // binding onto `globalThis`, while the separately required universal module
@@ -99,8 +105,48 @@
   const LEGACY_GUESS_DOT_COLOR = "#9b6cff";
   const liveChallengeAdapter = globalThis.OMTLiveChallenge;
   if (!liveChallengeAdapter) throw new Error("Live Challenge adapter did not load");
+  const cradioAdapter = globalThis.OMTModalCradio;
+  if (!cradioAdapter) throw new Error("Modal C-RADIO client did not load");
+  const cradioClient = new cradioAdapter.ModalCradioClient();
+
+  function configureCloudRadio() {
+    const status = cradioClient.tokenStatus();
+    const action = window.prompt(
+      `C-RADIO cloud is ${status.configured ? "configured" : "not configured"}. `
+        + "Enter SET to add/replace the private proxy token, CLEAR to remove it, or STATUS.",
+      "SET",
+    );
+    if (!action) return;
+    const command = String(action).trim().toLowerCase();
+    if (command === "status") {
+      window.alert(`C-RADIO cloud: ${cradioClient.tokenStatus().configured ? "configured" : "not configured"}.`);
+      return;
+    }
+    if (command === "clear") {
+      cradioClient.clearToken();
+      window.alert("C-RADIO cloud token cleared.");
+      return;
+    }
+    if (command !== "set" && command !== "replace") {
+      window.alert("Choose SET, CLEAR, or STATUS.");
+      return;
+    }
+    const token = window.prompt("Paste the joined wk-….ws-… proxy token. It is stored only in Tampermonkey storage.");
+    if (!token) return;
+    try {
+      cradioClient.setToken(token);
+      window.alert("C-RADIO cloud token saved.");
+    } catch (_error) {
+      window.alert("That token format was not accepted. No token was saved.");
+    }
+  }
+
+  if (typeof GM_registerMenuCommand === "function") {
+    GM_registerMenuCommand("Configure C-RADIO cloud", configureCloudRadio);
+  }
   const { LIVE_CHALLENGE_PATH, PARTY_LOBBY_PATH } = liveChallengeAdapter;
   const prewarmedRoundKeys = new Set();
+  const modalRoundPromises = new Map();
   const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
   const mapLayerPreferences = readMapLayerPreferences();
   const mapColorPreferences = readMapColorPreferences();
@@ -309,6 +355,30 @@
     return /^[\x20-\x7e]+$/.test(decoded) ? decoded : text;
   }
 
+  function prefetchModalRound(panoId, context = {}) {
+    if (!panoId || !cradioClient.configured()) return Promise.resolve({ ok: false, reason: "not-configured" });
+    const id = String(panoId);
+    if (modalRoundPromises.has(id)) return modalRoundPromises.get(id);
+    const pending = cradioClient.prefetch(id, context).catch(() => ({ ok: false, reason: "network-error" }));
+    modalRoundPromises.set(id, pending);
+    if (modalRoundPromises.size > 128) {
+      modalRoundPromises.delete(modalRoundPromises.keys().next().value);
+    }
+    return pending;
+  }
+
+  async function prefetchModalForMap(panoId, context = {}) {
+    if (!panoId || !cradioClient.configured()) {
+      return { ok: false, reason: "not-configured" };
+    }
+    const sourceMapKey = context.sourceMapKey;
+    if (sourceMapKey) {
+      const knownMap = await portableApi.isKnownMap(sourceMapKey).catch(() => false);
+      if (knownMap) return { ok: false, reason: "known-map" };
+    }
+    return prefetchModalRound(panoId, context);
+  }
+
   function prewarmRawRound(data) {
     const roundNumber = Number(data?.round);
     const guesses = data?.player?.guesses;
@@ -321,6 +391,14 @@
     const panoId = decodedPanoId(location?.panoId);
     const latitude = Number(location?.lat);
     const longitude = Number(location?.lng);
+    if (panoId) {
+      prefetchModalForMap(panoId, {
+        latitude,
+        longitude,
+        sourceMapKey: datasetKey,
+        datasetKey: "balanced-world-50k",
+      });
+    }
     if (!datasetKey || (!panoId && (!Number.isFinite(latitude) || !Number.isFinite(longitude)))) return;
     const key = `${data.token || "game"}:${roundNumber}:${panoId || `${latitude},${longitude}`}`;
     if (prewarmedRoundKeys.has(key)) return;
@@ -346,7 +424,7 @@
       // universal query privately during play; UniversalSimilarity retains the
       // promise/result, so post-round review reuses it instead of starting the
       // browser models after the guess. No trainer UI is shown here.
-      if (panoId) {
+      if (panoId && !cradioClient.configured()) {
         portableApi.precomputeUniversalRound(panoId).catch((error) => {
           console.warn("Meta Trainer: during-round universal analysis failed", error);
         });
@@ -960,7 +1038,7 @@
         ? `<div><strong>Family click</strong><span>${expected.a.toFixed(5)}, ${expected.o.toFixed(5)}</span><span>${Math.round(expected.e).toLocaleString()} average points within this family</span></div>`
         : "",
       state.showVisualNeighbors && neighborClick
-        ? `<div><strong>Similar-view click</strong><span>${neighborClick.latitude.toFixed(5)}, ${neighborClick.longitude.toFixed(5)}</span><span>${Math.round(neighborClick.expectedScore).toLocaleString()} expected points from the exact core + full visual distribution</span></div>`
+        ? `<div><strong>${review.cloud ? "C-RADIO click" : "Similar-view click"}</strong><span>${neighborClick.latitude.toFixed(5)}, ${neighborClick.longitude.toFixed(5)}</span><span>${Number.isFinite(neighborClick.expectedScore) ? `${Math.round(neighborClick.expectedScore).toLocaleString()} expected points` : "exact cloud recommendation"}</span></div>`
         : "",
     ].filter(Boolean).join("");
     const neighborhoodHtml = neighborhood ? (() => {
@@ -2681,7 +2759,7 @@
         map,
         position: { lat: neighborClick.latitude, lng: neighborClick.longitude },
         icon: icons.neighborsIdeal,
-        title: `Adaptive visual click · ${Math.round(neighborClick.expectedScore).toLocaleString()} expected points`,
+        title: `${context.cloud ? "Exact C-RADIO" : "Adaptive visual"} click${Number.isFinite(neighborClick.expectedScore) ? ` · ${Math.round(neighborClick.expectedScore).toLocaleString()} expected points` : ""}`,
         // Keep every visual-match dot hoverable when the recommendation lands on it.
         clickable: false,
         zIndex: 1001,
@@ -2942,7 +3020,14 @@
       const liveRound = normalizedLiveChallengeRound(
         await response.json(), challengeId, null,
       );
-      if (!liveRound?.mapId) return;
+      if (!liveRound?.location?.panoId) return;
+      prefetchModalForMap(liveRound.location.panoId, {
+        latitude: liveRound.location.lat,
+        longitude: liveRound.location.lng,
+        sourceMapKey: liveRound.mapId,
+        datasetKey: "balanced-world-50k",
+      });
+      if (!liveRound.mapId) return;
       const key = `live:${liveRound.roundKey}:${liveRound.location.panoId || "coordinate"}`;
       if (prewarmedRoundKeys.has(key)) return;
       prewarmedRoundKeys.add(key);
@@ -2960,7 +3045,7 @@
       try {
         await portableApi.prewarmMap(liveRound.mapId);
       } catch (_error) {
-        if (liveRound.location.panoId) {
+        if (liveRound.location.panoId && !cradioClient.configured()) {
           await portableApi.precomputeUniversalRound(liveRound.location.panoId);
         }
         return;
@@ -3094,7 +3179,8 @@
       eventState?.mapId,
       eventState?.map?.id,
     ].find((value) => typeof value === "string" && value.length);
-    if (round.location.panoId) params.set("pano_id", round.location.panoId);
+    const cloudPanoId = decodedPanoId(round.location.panoId);
+    if (cloudPanoId) params.set("pano_id", cloudPanoId);
     if (Number.isFinite(round.location.lat)) params.set("lat", round.location.lat);
     if (Number.isFinite(round.location.lng)) params.set("lng", round.location.lng);
     if (datasetKey) params.set("map_key", datasetKey);
@@ -3102,14 +3188,40 @@
     const roundDistanceM = Number(round.distance?.meters?.amount);
     if (Number.isFinite(roundScore)) params.set("round_score", roundScore);
     if (Number.isFinite(roundDistanceM)) params.set("round_distance_m", roundDistanceM);
-    // Retry the latency-critical similarity payload quietly at 100 ms and
-    // 200 ms before displaying a transient data-download failure.
+    const cloudConfigured = cradioClient.configured();
+    const inferredDiagonalKm = Number.isFinite(roundScore) && roundScore > 0 && roundScore < 5000
+        && Number.isFinite(roundDistanceM) && roundDistanceM > 0
+      ? -10 * (roundDistanceM / 1000) / Math.log(roundScore / 5000)
+      : null;
+    const knownMap = datasetKey
+      ? await portableApi.isKnownMap(datasetKey).catch(() => false)
+      : false;
+    const useCloudReview = cloudConfigured && Boolean(cloudPanoId) && !knownMap;
+    const cloudRequest = useCloudReview
+      ? prefetchModalRound(cloudPanoId, {
+        latitude: round.location.lat,
+        longitude: round.location.lng,
+        sourceMapKey: datasetKey,
+        datasetKey: "balanced-world-50k",
+        mapDiagonalKm: inferredDiagonalKm,
+      })
+      : Promise.resolve({ ok: false, reason: knownMap ? "known-map" : "missing-pano" });
+    // A configured Modal request is single-shot: the endpoint's uncached-call
+    // guard makes automatic retries unsafe. Known portable maps retain their
+    // fast local path, while arbitrary maps use exact cloud results.
+    const reviewRequest = useCloudReview
+      ? cloudRequest.then((result) => {
+        if (!result?.ok || !result.response) throw new Error("C-RADIO similarity unavailable");
+        return result.response;
+      })
+      : criticalRequest(`/api/neighborhood?${params}`);
     state.pendingTimer = window.setTimeout(() => {
       if (token === state.requestToken && !state.review) {
-        renderPending("Analyzing visual similarity…");
+        renderPending(useCloudReview
+          ? "C-RADIO similarity warming…"
+          : "Analyzing visual similarity…");
       }
     }, 250);
-    const reviewRequest = criticalRequest(`/api/neighborhood?${params}`);
     try {
       const review = await reviewRequest;
       clearTimeout(state.pendingTimer);
@@ -3142,12 +3254,36 @@
       clearTimeout(state.pendingTimer);
       state.pendingTimer = 0;
       if (token === state.requestToken) {
-        renderOffline(error.message);
-        state.offlineRetryTimer = setTimeout(() => {
-          if (token === state.requestToken) handleRoundEnd(eventState);
-        }, 650);
+        renderOffline(useCloudReview ? "C-RADIO similarity unavailable" : error.message);
+        if (!useCloudReview) {
+          state.offlineRetryTimer = setTimeout(() => {
+            if (token === state.requestToken) handleRoundEnd(eventState);
+          }, 650);
+        }
       }
     }
+  }
+
+  function prefetchModalFromEventState(eventState) {
+    const rounds = Array.isArray(eventState?.rounds) ? eventState.rounds : [];
+    const roundNumber = Number(eventState?.round || eventState?.currentRound || rounds.length);
+    const round = rounds[roundNumber - 1] || eventState?.location || eventState?.roundData;
+    const panoId = decodedPanoId(round?.panoId ?? round?.panoid ?? round?.location?.panoId);
+    if (!panoId) return;
+    const latitude = Number(round?.lat ?? round?.latitude ?? round?.location?.lat);
+    const longitude = Number(round?.lng ?? round?.longitude ?? round?.location?.lng);
+    const datasetKey = [
+      eventState?.map,
+      eventState?.mapId,
+      eventState?.datasetKey,
+      typeof eventState?.map === "object" ? eventState.map.id : null,
+    ].find((value) => typeof value === "string" && value.length);
+    prefetchModalForMap(panoId, {
+      latitude,
+      longitude,
+      sourceMapKey: datasetKey,
+      datasetKey: "balanced-world-50k",
+    });
   }
 
   async function initializeEvents() {
@@ -3158,12 +3294,16 @@
         framework.events.addEventListener("round_start", (event) => {
           clearRound();
           warmMapForRound(event.detail);
+          prefetchModalFromEventState(event.detail);
         });
         framework.events.addEventListener("round_end", (event) => handleRoundEnd(event.detail));
         pageWindow.GEFFetchEvents?.addEventListener("received_data", (event) => {
           prewarmRawRound(event.detail);
         });
-        if (framework.state?.round_in_progress) warmMapForRound(framework.state);
+        if (framework.state?.round_in_progress) {
+          warmMapForRound(framework.state);
+          prefetchModalFromEventState(framework.state);
+        }
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 20));

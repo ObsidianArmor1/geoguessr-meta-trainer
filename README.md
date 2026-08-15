@@ -48,9 +48,16 @@ coverage. Its purpose is to make the existing similarity workflow usable on
 unseen maps while the much larger, deliberately balanced reference corpus is
 built and validated.
 
-No companion app, Python server, account, API key, LAN connection, or manual
-map selection is required. Local learning state remains in the browser; this
-release has no analytics service.
+Optional private cloud queries are supported for arbitrary maps through the
+exact C-RADIOv4-H World-50K pilot. In Tampermonkey, open the userscript menu and
+choose **Configure C-RADIO cloud** to set, replace, clear, or check the joined
+`wk-….ws-…` proxy token. The token stays in Tampermonkey storage and is sent
+only as a bearer authorization header. Cloud requests are prefetched during
+play and cached locally; known portable maps continue to use their local packs.
+
+No companion app, Python server, account, LAN connection, or manual map
+selection is required for local mode. Local learning state remains in the
+browser; this release has no analytics service.
 
 The earlier clustering-family interface and all of its data are preserved at
 the [`family-meta-trainer-v1`](https://github.com/ObsidianArmor1/geoguessr-meta-trainer/tree/family-meta-trainer-v1)
