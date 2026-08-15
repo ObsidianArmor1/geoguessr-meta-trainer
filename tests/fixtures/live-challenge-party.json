@@ -1,0 +1,52 @@
+{
+  "route": "/party/lobby/ROOM",
+  "resultSelector": "[data-qa=\"correct-location-pin\"]",
+  "profile": { "id": "party-player" },
+  "payload": {
+    "options": { "map": { "id": "6a7d9951e250d15ffed33065" } },
+    "currentRoundNumber": 3,
+    "rounds": [
+      { "location": { "panoId": "party-old-1", "lat": 30, "lng": -90 } },
+      { "location": { "panoId": "party-old-2", "lat": 31, "lng": -91 } },
+      {
+        "location": {
+          "panoid": "party-pano-nested-abcdefghij",
+          "latitude": 39.739236,
+          "longitude": -104.990251
+        }
+      }
+    ],
+    "players": [
+      {
+        "user": { "id": "someone-else" },
+        "roundResults": [
+          { "roundNumber": 3, "guess": { "latitude": 0, "longitude": 0 } }
+        ]
+      },
+      {
+        "profileId": "party-player",
+        "roundResults": [
+          { "roundNumber": 1, "answer": { "latitude": 11, "longitude": 12 } },
+          { "roundNumber": 2, "answer": { "latitude": 21, "longitude": 22 } },
+          {
+            "roundIndex": 2,
+            "answer": { "latitude": 40.760779, "longitude": -111.891047 },
+            "points": 3777,
+            "distanceInMeters": 612345,
+            "duration": 24
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "challengeId": "party-game",
+    "mapId": "6a7d9951e250d15ffed33065",
+    "roundNumber": 3,
+    "panoId": "party-pano-nested-abcdefghij",
+    "guess": { "lat": 40.760779, "lng": -111.891047 },
+    "score": 3777,
+    "distanceMeters": 612345,
+    "timeSeconds": 24
+  }
+}

@@ -11,8 +11,10 @@ Post-round visual study for these custom maps:
 2. Open [the userscript](https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js).
 3. Press **Install**, then play either supported map normally.
 
-The review appears only after a round is over. `M` toggles the similarity map
-and `V` opens the visual-comparison board. The optional **Guess comparison** layer
+The review appears only after a round is over. `M` toggles the similarity map,
+`G` toggles the guess comparison, and `V` opens the visual-comparison board.
+The visible **Guess** and **Colors** controls persist their state between rounds.
+The optional **Guess comparison** layer
 draws the revealed location's visual matches as filled red points and the
 visual neighborhood of the nearest stored panorama to the player's guess as
 filled cobalt points. Shared locations use a single split red/cobalt point, and

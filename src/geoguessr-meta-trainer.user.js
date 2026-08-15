@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.0.0-beta.17
+// @version      2.0.0-beta.18
 // @description  Post-round visual similarity learning for supported GeoGuessr maps.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_openInTab
 // @grant        unsafeWindow
@@ -31,7 +32,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.0.0-beta.17";
+  const USERSCRIPT_VERSION = "2.0.0-beta.18";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -84,8 +85,9 @@
     guessDots: "#244cff",
   };
   const LEGACY_GUESS_DOT_COLOR = "#9b6cff";
-  const LIVE_CHALLENGE_PATH = /^\/(?:api\/)?live-challenge\/([^/?#]+)\/?$/;
-  const PARTY_LOBBY_PATH = /^\/party\/lobby\/[^/?#]+\/?$/;
+  const liveChallengeAdapter = globalThis.OMTLiveChallenge;
+  if (!liveChallengeAdapter) throw new Error("Live Challenge adapter did not load");
+  const { LIVE_CHALLENGE_PATH, PARTY_LOBBY_PATH } = liveChallengeAdapter;
   const prewarmedRoundKeys = new Set();
   const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
   const mapLayerPreferences = readMapLayerPreferences();
@@ -594,12 +596,19 @@
     .omt-dock button { min-height:40px; padding:8px 12px; border:0; border-left:1px solid var(--line); color:#d9dbe0; background:transparent; cursor:pointer; font-weight:650; }
     .omt-dock button:first-child { border-left:0; }
     .omt-dock button:hover { background:#ffffff12; }
+    .omt-dock button.active { color:#fff; background:#ffffff17; }
+    .omt-dock button:disabled { color:#777981; cursor:default; background:transparent; }
     .omt-dock .omt-dock-primary { color:#101114; background:#f1f2f4; }
     .omt-dock .omt-dock-primary:hover { background:#fff; }
     .omt-dock .omt-dock-primary kbd { color:#44464d; border-color:#0003; background:#0000000b; }
     .omt-dock-count { display:inline-grid; place-items:center; min-width:19px; height:19px; margin-left:7px; padding:0 5px; border-radius:999px; color:#111216; background:#e7e8eb; font-size:10px; }
     .omt-dock-status { min-height:40px; display:flex; align-items:center; padding:8px 12px; color:#b7b9bf; }
     .omt-dock-status::before { content:""; width:7px; height:7px; margin-right:8px; border-radius:50%; background:#c97a64; }
+    .omt-dock-settings { position:relative; display:flex; align-items:stretch; border-left:1px solid var(--line); }
+    .omt-dock-settings summary { display:flex; align-items:center; min-height:40px; padding:8px 12px; color:#d9dbe0; cursor:pointer; font-weight:650; list-style:none; }
+    .omt-dock-settings summary::-webkit-details-marker { display:none; }
+    .omt-dock-settings[open] summary { background:#ffffff12; }
+    .omt-dock-settings-panel { position:fixed; z-index:2147483002; top:58px; right:12px; display:grid; grid-template-columns:repeat(3,auto); gap:8px; padding:10px; border:1px solid var(--line-strong); border-radius:8px; background:#17181bf5; box-shadow:0 8px 28px #0008; }
     .omt-drawer { position:fixed; z-index:2147483001; top:10px; right:10px; bottom:94px; width:min(600px,47vw); min-width:500px; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--line-strong); border-radius:10px; background:#17181bf7; box-shadow:0 18px 60px #000b; backdrop-filter:blur(16px); }
     .omt-head { flex:none; display:flex; align-items:center; justify-content:space-between; min-height:54px; gap:12px; padding:10px 12px 10px 16px; border-bottom:1px solid var(--line); }
     .omt-head small { display:block; color:var(--muted); font-size:10px; letter-spacing:.04em; }
@@ -823,12 +832,30 @@
     const mode = review.visualNeighborhood
       ? `<button id="omt-mode-cycle" title="Toggle similarity map">${mapModeLabel()} <kbd>M</kbd></button>`
       : "";
-    return `<div class="omt-dock">${compare}${mode}</div>`;
+    const guess = review.visualNeighborhood
+      ? `<button id="omt-guess-cycle" class="${state.showGuessNeighbors ? "active" : ""}" title="Compare the visual neighborhood near your guess with the revealed location" ${state.playerGuess ? "" : "disabled"}>Guess ${state.showGuessNeighbors ? "on" : "off"} <kbd>G</kbd></button>`
+      : "";
+    const settings = review.visualNeighborhood
+      ? `<details class="omt-dock-settings"><summary>Colors</summary><div class="omt-dock-settings-panel"><label class="omt-color-setting">Round <input type="color" id="omt-dock-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Guess <input type="color" id="omt-dock-guess-dot-color" value="${state.guessDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-dock-click-color" value="${state.neighborClickColor}"></label></div></details>`
+      : "";
+    return `<div class="omt-dock">${compare}${mode}${guess}${settings}</div>`;
   }
 
   function bindDockUi() {
     state.shadow.getElementById("omt-compare-launch")?.addEventListener("click", openVisualBoard);
     state.shadow.getElementById("omt-mode-cycle")?.addEventListener("click", cycleMapLayers);
+    state.shadow.getElementById("omt-guess-cycle")?.addEventListener("click", () => {
+      setGuessComparison(!state.showGuessNeighbors);
+    });
+    state.shadow.getElementById("omt-dock-dot-color")?.addEventListener("input", (event) => {
+      setMapColor("dots", event.target.value);
+    });
+    state.shadow.getElementById("omt-dock-guess-dot-color")?.addEventListener("input", (event) => {
+      setMapColor("guess", event.target.value);
+    });
+    state.shadow.getElementById("omt-dock-click-color")?.addEventListener("input", (event) => {
+      setMapColor("click", event.target.value);
+    });
   }
 
   function render() {
@@ -1066,6 +1093,10 @@
       event.preventDefault();
       event.stopPropagation();
       if (state.visualBoardOpen) closeVisualBoard(); else openVisualBoard();
+    } else if (event.code === "KeyG" && state.playerGuess) {
+      event.preventDefault();
+      event.stopPropagation();
+      setGuessComparison(!state.showGuessNeighbors);
     }
   }
 
@@ -2789,51 +2820,19 @@
   }
 
   function pathnameFromUrl(value) {
-    try {
-      return new URL(value, "https://www.geoguessr.com").pathname;
-    } catch (_error) {
-      return "";
-    }
+    return liveChallengeAdapter.pathnameFromUrl(value);
   }
 
   function liveChallengeIdFromUrl(value) {
-    return pathnameFromUrl(value).match(LIVE_CHALLENGE_PATH)?.[1] || null;
+    return liveChallengeAdapter.challengeIdFromUrl(value);
   }
 
   function liveChallengeIdForPage(trackedChallenge) {
-    const routeId = liveChallengeIdFromUrl(location.pathname);
-    if (routeId) return routeId;
-    if (!PARTY_LOBBY_PATH.test(location.pathname)) return null;
-    const resources = performance.getEntriesByType("resource");
-    for (let index = resources.length - 1; index >= 0; index -= 1) {
-      const id = liveChallengeIdFromUrl(resources[index].name);
-      if (id) return id;
-    }
-    return trackedChallenge?.partyLobbyPath === location.pathname
-      ? trackedChallenge.id
-      : null;
-  }
-
-  function decodeLiveChallengePanoId(value) {
-    const encoded = String(value || "");
-    // Live Challenge currently serializes pano IDs as long hexadecimal byte
-    // strings. Preserve an ordinary pano ID if GeoGuessr changes that shape.
-    if (encoded.length < 32 || encoded.length % 2 || !/^[0-9a-f]+$/i.test(encoded)) {
-      return encoded;
-    }
-    let decoded = "";
-    for (let index = 0; index < encoded.length; index += 2) {
-      decoded += String.fromCharCode(parseInt(encoded.slice(index, index + 2), 16));
-    }
-    return decoded;
-  }
-
-  function guessCoordinates(value) {
-    const latitude = Number(value?.lat ?? value?.latitude);
-    const longitude = Number(value?.lng ?? value?.longitude);
-    return Number.isFinite(latitude) && Number.isFinite(longitude)
-      ? { lat: latitude, lng: longitude }
-      : null;
+    return liveChallengeAdapter.challengeIdForPage(
+      location.pathname,
+      performance.getEntriesByType("resource").map((entry) => entry.name),
+      trackedChallenge,
+    );
   }
 
   async function liveChallengeProfileId() {
@@ -2845,8 +2844,7 @@
     ).then(async (response) => {
       if (!response.ok) return null;
       const profile = await response.json();
-      const id = profile?.user?.id ?? profile?.id ?? profile?.userId;
-      state.liveChallengeProfileId = id ? String(id) : null;
+      state.liveChallengeProfileId = liveChallengeAdapter.profileId(profile);
       return state.liveChallengeProfileId;
     }).catch(() => null).finally(() => {
       state.liveChallengeProfilePromise = null;
@@ -2854,115 +2852,70 @@
     return state.liveChallengeProfilePromise;
   }
 
-  function liveChallengePlayerGuess(data, sourceRound, roundNumber, profileId) {
-    const direct = [
-      sourceRound?.player_guess,
-      sourceRound?.playerGuess,
-      sourceRound?.guess,
-      data?.player?.guesses?.[roundNumber - 1],
-      data?.currentPlayer?.guesses?.[roundNumber - 1],
-      data?.me?.guesses?.[roundNumber - 1],
-    ];
-    for (const value of direct) {
-      const coordinates = guessCoordinates(value);
-      if (coordinates) return coordinates;
-    }
-    if (!profileId) return null;
-
-    // Live Challenge payload shapes have changed repeatedly. Walk only branches
-    // belonging to the signed-in profile and accept coordinates whose path says
-    // guess/answer/result; never mistake the question panorama for the guess.
-    const candidates = [];
-    const seen = new Set();
-    const identityKeys = new Set(["id", "userId", "playerId", "profileId"]);
-    const visit = (value, path, inheritedProfile, depth) => {
-      if (!value || typeof value !== "object" || depth > 9 || seen.has(value)) return;
-      seen.add(value);
-      const ownProfile = Object.entries(value).some(([key, item]) => (
-        identityKeys.has(key) && String(item) === String(profileId)
-      )) || [value.user?.id, value.profile?.id, value.player?.id].some(
-        (item) => item != null && String(item) === String(profileId)
-      );
-      const belongsToProfile = inheritedProfile || ownProfile;
-      const coordinates = guessCoordinates(value);
-      const pathText = path.join(".").toLowerCase();
-      if (
-        belongsToProfile
-        && coordinates
-        && /(guess|answer|result)/.test(pathText)
-        && !/(question|panorama)/.test(pathText)
-      ) {
-        const statedRound = Number(value.roundNumber ?? value.round ?? value.roundIndex + 1);
-        const roundMatch = !Number.isFinite(statedRound) || statedRound === roundNumber;
-        if (roundMatch) candidates.push({ coordinates, depth });
-      }
-      for (const [key, item] of Object.entries(value)) {
-        visit(item, [...path, key], belongsToProfile, depth + 1);
-      }
-    };
-    visit(data, [], false, 0);
-    candidates.sort((left, right) => left.depth - right.depth);
-    return candidates[0]?.coordinates || null;
-  }
-
   function normalizedLiveChallengeRound(data, challengeId, profileId = null) {
-    const roundNumber = Math.max(1, Number(data?.currentRoundNumber || 1));
-    const sourceRound = data?.rounds?.[roundNumber - 1];
-    const panorama = sourceRound?.question?.panoramaQuestionPayload?.panorama;
-    if (!panorama) return null;
-    const panoId = decodeLiveChallengePanoId(
-      panorama.panoId ?? panorama.panoid ?? panorama.id
-    );
-    const latitude = Number(panorama.lat ?? panorama.latitude);
-    const longitude = Number(panorama.lng ?? panorama.longitude);
-    if (!panoId && (!Number.isFinite(latitude) || !Number.isFinite(longitude))) return null;
-    const mapId = String(
-      data?.options?.mapSlug
-      ?? data?.options?.map?.slug
-      ?? data?.options?.map?.id
-      ?? data?.mapSlug
-      ?? ""
-    );
-    return {
-      roundNumber,
-      roundKey: `${challengeId}:${roundNumber}`,
-      mapId,
-      location: {
-        panoId,
-        lat: latitude,
-        lng: longitude,
-      },
-      playerGuess: liveChallengePlayerGuess(
-        data, sourceRound, roundNumber, profileId
-      ),
-    };
+    return liveChallengeAdapter.normalizeRound(data, challengeId, profileId);
   }
 
   async function fetchLiveChallengeRound(challengeId) {
-    const response = await pageWindow.fetch(
+    const dataPromise = pageWindow.fetch(
       `https://game-server.geoguessr.com/api/live-challenge/${encodeURIComponent(challengeId)}`,
       { method: "GET", credentials: "include" }
-    );
-    if (!response.ok) throw new Error(`Live Challenge returned ${response.status}`);
+    ).then(async (response) => {
+      if (!response.ok) throw new Error(`Live Challenge returned ${response.status}`);
+      return response.json();
+    });
     const [data, profileId] = await Promise.all([
-      response.json(),
+      dataPromise,
       liveChallengeProfileId(),
     ]);
     return normalizedLiveChallengeRound(data, challengeId, profileId);
   }
 
+  async function prewarmLiveChallengeRound(challengeId) {
+    try {
+      const response = await pageWindow.fetch(
+        `https://game-server.geoguessr.com/api/live-challenge/${encodeURIComponent(challengeId)}`,
+        { method: "GET", credentials: "include" },
+      );
+      if (!response.ok) return;
+      const liveRound = normalizedLiveChallengeRound(
+        await response.json(), challengeId, null,
+      );
+      if (!liveRound?.mapId) return;
+      const key = `live:${liveRound.roundKey}:${liveRound.location.panoId || "coordinate"}`;
+      if (prewarmedRoundKeys.has(key)) return;
+      prewarmedRoundKeys.add(key);
+      if (prewarmedRoundKeys.size > 30) {
+        prewarmedRoundKeys.delete(prewarmedRoundKeys.values().next().value);
+      }
+      warmMapForRound({ mapId: liveRound.mapId });
+      const params = new URLSearchParams({ map_key: liveRound.mapId });
+      if (liveRound.location.panoId) params.set("pano_id", liveRound.location.panoId);
+      if (Number.isFinite(liveRound.location.lat)) params.set("lat", liveRound.location.lat);
+      if (Number.isFinite(liveRound.location.lng)) params.set("lng", liveRound.location.lng);
+      const review = await request(`/api/neighborhood?${params}`);
+      if (!review?.matched) return;
+      const dataset = encodeURIComponent(review.datasetKey);
+      const mapIndex = review.location.mapIndex;
+      const [, board] = await Promise.all([
+        request(`/api/neighborhood/${mapIndex}?dataset=${dataset}`),
+        request(`/api/visual-board/${mapIndex}?dataset=${dataset}`),
+      ]);
+      await warmVisualBoard(board);
+    } catch (_error) {
+      // This path is cache-only. The post-round request remains authoritative.
+    }
+  }
+
   function liveChallengeResultMounted() {
-    return Boolean(document.querySelector([
-      '[class*="result-map_roundPin"]',
-      '[class*="result-map_round-pin"]',
-      '[data-qa="correct-location-pin"]',
-    ].join(",")));
+    return liveChallengeAdapter.resultMounted(document);
   }
 
   function initializeLiveChallengeAdapter() {
     let trackedChallenge = null;
     let checkQueued = false;
     let lookupInFlight = false;
+    let prewarmRequestedForActiveRound = false;
 
     const trackResource = (url) => {
       if (!PARTY_LOBBY_PATH.test(location.pathname)) return;
@@ -2986,8 +2939,15 @@
         if (state.liveChallengeResultVisible) clearRound();
         state.liveChallengeResultVisible = false;
         state.liveChallengePendingKey = "";
+        if (challengeId && !prewarmRequestedForActiveRound) {
+          prewarmRequestedForActiveRound = true;
+          prewarmLiveChallengeRound(challengeId);
+          // Party state can advance a moment after the result view disappears.
+          window.setTimeout(() => prewarmLiveChallengeRound(challengeId), 500);
+        }
         return;
       }
+      prewarmRequestedForActiveRound = false;
       state.liveChallengeResultVisible = true;
       if (lookupInFlight) return;
       lookupInFlight = true;
@@ -2999,20 +2959,7 @@
           || liveRound.roundKey === state.liveChallengePendingKey
         ) return;
         state.liveChallengePendingKey = liveRound.roundKey;
-        const rounds = Array.from({ length: liveRound.roundNumber }, () => ({}));
-        rounds[liveRound.roundNumber - 1] = {
-          eventKey: liveRound.roundKey,
-          gameId: challengeId,
-          datasetKey: liveRound.mapId,
-          mapId: liveRound.mapId,
-          location: liveRound.location,
-          player_guess: liveRound.playerGuess,
-        };
-        await handleRoundEnd({
-          mapId: liveRound.mapId,
-          map: { id: liveRound.mapId },
-          rounds,
-        });
+        await handleRoundEnd(liveChallengeAdapter.buildEventState(liveRound, challengeId));
         state.liveChallengeLastRoundKey = liveRound.roundKey;
       } catch (error) {
         console.error("Meta Trainer: Live Challenge round lookup failed", error);
