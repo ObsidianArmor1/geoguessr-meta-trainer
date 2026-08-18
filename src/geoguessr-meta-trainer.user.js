@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.1.0-beta.10
+// @version      2.1.0-beta.11
 // @description  Browser-local post-round visual similarity learning for any Street View map.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -3257,7 +3257,14 @@
       clearTimeout(state.pendingTimer);
       state.pendingTimer = 0;
       if (token === state.requestToken) {
-        renderOffline(useCloudReview ? "C-RADIO similarity unavailable" : error.message);
+        // The cloud branch discarded error.message and rendered a fixed string,
+        // so the reason added upstream never reached the screen.
+        console.warn("Meta Trainer: cloud review failed", error);
+        renderOffline(
+          useCloudReview
+            ? (error && error.message ? error.message : "C-RADIO similarity unavailable")
+            : error.message,
+        );
         if (!useCloudReview) {
           state.offlineRetryTimer = setTimeout(() => {
             if (token === state.requestToken) handleRoundEnd(eventState);
