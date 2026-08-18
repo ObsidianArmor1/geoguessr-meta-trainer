@@ -8,10 +8,11 @@
   const CACHE_KEY = "omt-cradio-cache-v1";
   const CACHE_VERSION = 1;
   const MAX_CACHE_ENTRIES = 24;
-  // A cold Modal container measured 48s: boot, load the 651M-parameter model and
-  // push 1.5 GB of reference vectors to the GPU. At 20s the client gave up
-  // mid-boot and reported "similarity unavailable" for a service that was
-  // working. Warm queries return in about a second.
+  // Measured against the Lodestar service: 0.3-0.5s warm, 10.7s cold, and ~45s
+  // for the first query after a deployment while the GPU memory snapshot is
+  // created. The old 20s limit gave up during that first call and reported
+  // "similarity unavailable" for a service that was working, so the ceiling is
+  // set above the once-per-deploy case rather than the common one.
   const REQUEST_TIMEOUT_MS = 90_000;
   const TOKEN_PATTERN = /^wk-[A-Za-z0-9._~-]+\.ws-[A-Za-z0-9._~-]+$/;
 
