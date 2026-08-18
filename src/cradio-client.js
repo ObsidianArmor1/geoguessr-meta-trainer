@@ -1,7 +1,9 @@
 (function (root) {
   "use strict";
 
-  const ENDPOINT = "https://obsidianarmor1--geoguessr-cradio-pilot-v1-pilot-query.modal.run";
+  // Lodestar 100k (waves 0001-0002). The 49,417-panorama Balanced World pilot
+  // stays deployed at ...-pilot-v1-... as the baseline to compare against.
+  const ENDPOINT = "https://obsidianarmor1--geoguessr-cradio-lodestar-v1-pilot-query.modal.run";
   const TOKEN_KEY = "omt-cradio-proxy-token-v1";
   const CACHE_KEY = "omt-cradio-cache-v1";
   const CACHE_VERSION = 1;
@@ -261,6 +263,16 @@
     };
   }
 
+  function headingOf(context) {
+    const value = Number(
+      context?.heading ??
+      context?.round?.heading ??
+      context?.location?.heading ??
+      context?.pano?.heading,
+    );
+    return Number.isFinite(value) ? ((value % 360) + 360) % 360 : 0;
+  }
+
   function defaultValue(name, fallback) {
     return typeof root[name] === "function" ? root[name] : fallback;
   }
@@ -360,7 +372,11 @@
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ panoId, count: 500 }),
+          // The corpus is embedded spawn-relative: four views at 0/90/180/270
+          // from the panorama's OWN heading. Without sending it the service
+          // falls back to absolute north and compares differently framed
+          // images, which degrades retrieval quietly rather than failing.
+          body: JSON.stringify({ panoId, count: 500, heading: headingOf(context) }),
           timeout: this.timeoutMs,
         });
         if (response.status === 401 || response.status === 403) return { ok: false, reason: "unauthorized" };
