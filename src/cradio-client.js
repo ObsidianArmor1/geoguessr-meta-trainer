@@ -8,7 +8,11 @@
   const CACHE_KEY = "omt-cradio-cache-v1";
   const CACHE_VERSION = 1;
   const MAX_CACHE_ENTRIES = 24;
-  const REQUEST_TIMEOUT_MS = 20_000;
+  // A cold Modal container measured 48s: boot, load the 651M-parameter model and
+  // push 1.5 GB of reference vectors to the GPU. At 20s the client gave up
+  // mid-boot and reported "similarity unavailable" for a service that was
+  // working. Warm queries return in about a second.
+  const REQUEST_TIMEOUT_MS = 90_000;
   const TOKEN_PATTERN = /^wk-[A-Za-z0-9._~-]+\.ws-[A-Za-z0-9._~-]+$/;
 
   function clamp(value, minimum, maximum) {
