@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.1.0-beta.9
+// @version      2.1.0-beta.10
 // @description  Browser-local post-round visual similarity learning for any Street View map.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -3211,7 +3211,10 @@
     // fast local path, while arbitrary maps use exact cloud results.
     const reviewRequest = useCloudReview
       ? cloudRequest.then((result) => {
-        if (!result?.ok || !result.response) throw new Error("C-RADIO similarity unavailable");
+        if (!result?.ok || !result.response) {
+          const why = [result?.reason, result?.status].filter(Boolean).join(" ");
+          throw new Error(why ? `C-RADIO similarity unavailable (${why})` : "C-RADIO similarity unavailable");
+        }
         return result.response;
       })
       : criticalRequest(`/api/neighborhood?${params}`);

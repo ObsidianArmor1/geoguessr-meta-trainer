@@ -384,9 +384,22 @@
           body: JSON.stringify({ panoId, count: 500, heading: headingOf(context) }),
           timeout: this.timeoutMs,
         });
-        if (response.status === 401 || response.status === 403) return { ok: false, reason: "unauthorized" };
-        if (response.status === 429) return { ok: false, reason: "rate-limited" };
-        if (response.status < 200 || response.status >= 300) return { ok: false, reason: "http-error" };
+        // Every failure used to surface as one generic toast, which made a
+        // wrong endpoint, an expired token and a cold-start timeout look
+        // identical. Carry the status and a short body excerpt.
+        const detail = typeof response.body === "string" ? response.body.slice(0, 160) : "";
+        if (response.status === 401 || response.status === 403) {
+          console.warn("[cradio] unauthorized", response.status, this.endpoint, detail);
+          return { ok: false, reason: "unauthorized", status: response.status, detail };
+        }
+        if (response.status === 429) {
+          console.warn("[cradio] rate-limited", detail);
+          return { ok: false, reason: "rate-limited", status: 429, detail };
+        }
+        if (response.status < 200 || response.status >= 300) {
+          console.warn("[cradio] http-error", response.status, this.endpoint, detail);
+          return { ok: false, reason: "http-error", status: response.status, detail };
+        }
         const raw = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
         const adapted = adaptResponse(raw, { ...context, panoId });
         const cache = this.readCache();
@@ -394,6 +407,7 @@
         this.writeCache(cache);
         return { ok: true, cached: false, response: adapted };
       } catch (error) {
+        console.warn("[cradio] request failed", this.endpoint, error && error.message);
         const reason = error?.code === "timeout" ? "timeout" : "network-error";
         return { ok: false, reason };
       }
