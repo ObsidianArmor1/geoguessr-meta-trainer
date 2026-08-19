@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.4
+// @version      2.2.0-beta.6
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -843,7 +843,7 @@
     .omt-legend-dot { display:inline-block; width:8px; height:8px; margin:0 4px 0 1px; border:1px solid #fff; border-radius:50%; background:#767981; }
     .omt-legend-match { display:inline-block; width:8px; height:8px; margin:0 4px 0 8px; border:1px solid #fff; border-radius:50%; vertical-align:-1px; }
     .omt-legend-round-match { background:var(--omt-neighbor-dot,#ff334f); }
-    .omt-legend-tail-match { background:var(--omt-neighbor-dot,#ff334f); opacity:.45; transform:scale(.62); }
+    .omt-legend-tail-match { background:var(--omt-neighbor-dot,#ff334f); opacity:.45; }
     .omt-legend-guess-match { background:var(--omt-guess-dot,#244cff); }
     .omt-legend-shared-match { background:linear-gradient(90deg,var(--omt-neighbor-dot,#ff334f) 0 50%,var(--omt-guess-dot,#244cff) 50%); }
     .omt-legend-current { display:inline-block; width:9px; height:9px; margin:0 4px 0 7px; border:2px solid #fff; border-radius:50%; background:#17181b; }
@@ -1166,7 +1166,9 @@
   }
 
   function setGuessComparison(enabled) {
-    if (state.review?.universal) return;
+    // The universal (corpus) path used to bail out here: it had no map data to
+    // search for a panorama near the guess. The static pack carries every
+    // corpus coordinate, so it is served by loadGuessNeighborhood below.
     state.showGuessNeighbors = Boolean(enabled);
     saveMapLayerPreferences();
     if (state.showGuessNeighbors && !state.showVisualNeighbors) {
@@ -2438,13 +2440,11 @@
             visible += 1;
             const { x, y } = pixel;
             const strength = Math.max(0, Math.min(1, point.strength));
-            // The cloud is drawn whole, so core and tail have to be told apart
-            // by eye: the core is larger, opaque and outlined; the tail is
-            // smaller and translucent, reading as the shape around the core
-            // rather than as equally-good answers.
-            const pointRadius = point.core
-              ? neighborBaseRadius * (1.18 + strength * 0.30)
-              : neighborBaseRadius * (0.62 + strength * 0.16);
+            // One size for every dot. Core and tail are told apart by opacity
+            // and outline only: the core is solid and outlined, the tail
+            // translucent, so the cloud keeps a single visual scale and the
+            // shape comes from where the solid dots sit.
+            const pointRadius = neighborBaseRadius * (0.88 + strength * 0.20);
             context.globalAlpha = point.core ? 1 : 0.45;
             if (point.comparisonSide === "both") {
               // One split marker communicates overlap without stacking rings or
@@ -2947,6 +2947,23 @@
     const review = state.review;
     const guess = state.playerGuess;
     if (!state.showGuessNeighbors || !review || !guess) return;
+    if (review.universal) {
+      // Corpus path: no dataset to query, so the pack answers directly.
+      try {
+        const comparison = await cradioClient.guessNeighborhood(guess, {
+          sourceMapKey: review.sourceMapKey,
+        });
+        if (token !== state.requestToken || state.review !== review
+            || !state.showGuessNeighbors) return;
+        if (!comparison) return;
+        state.guessNeighborhood = comparison;
+        render();
+        showMetaOnMap(false);
+      } catch (error) {
+        console.error("Meta Trainer: could not load guess-side cloud", error);
+      }
+      return;
+    }
     try {
       const query = new URLSearchParams({
         dataset: review.datasetKey,

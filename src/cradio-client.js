@@ -390,6 +390,45 @@
       return this.fetch(panoId, context);
     }
 
+    // The guess-side cloud, restored on the corpus path.
+    //
+    // It existed for the 50k packs and was disabled when play moved to
+    // arbitrary maps, because that path had no map data to search - only the
+    // round's own Modal result. The static pack carries every corpus
+    // coordinate, so the original behaviour is available again: find the
+    // panorama nearest the player's guess and draw ITS neighbourhood beside
+    // the round's.
+    async guessNeighborhood(guess, context = {}) {
+      const pack = root.LodestarPack;
+      if (!pack || !guess) return null;
+      const latitude = Number(guess.lat ?? guess.latitude);
+      const longitude = Number(guess.lng ?? guess.longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+      try {
+        // A guess in the ocean would otherwise anchor to whatever continent is
+        // least far away - measured at 1,117 km for a mid-Pacific guess. The
+        // original could not do this because it searched only the map's own
+        // panoramas; a corpus-wide search needs the cap put back explicitly.
+        const anchor = await pack.nearest(latitude, longitude, { withinKm: 100 });
+        if (!anchor) return null;
+        const raw = await pack.queryRow(anchor.row, 300);
+        if (!raw) return null;
+        const adapted = adaptResponse(raw, { ...context, panoId: raw.panoId });
+        return {
+          ...adapted,
+          guessAnchor: {
+            panoId: anchor.panoId,
+            latitude: anchor.latitude,
+            longitude: anchor.longitude,
+            distanceFromGuessKm: anchor.distanceKm,
+          },
+        };
+      } catch (error) {
+        console.warn("[cradio] guess-side cloud unavailable:", error && error.message);
+        return null;
+      }
+    }
+
     async fromPack(panoId, context) {
       const pack = root.LodestarPack;
       if (!pack || this.packDisabled) return null;
