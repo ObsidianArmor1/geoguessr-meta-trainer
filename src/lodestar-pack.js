@@ -440,6 +440,10 @@
       status: "complete",
       panoId: String(panoId),
       heading: heading ? heading[row] / 100 : null,
+      // where the queried panorama itself is, so distances to its matches can
+      // be measured without the caller having to know
+      latitude: dir.coords[row * 2] / COORD_SCALE,
+      longitude: dir.coords[row * 2 + 1] / COORD_SCALE,
       cacheHit: false,
       source: "lodestar-static-pack",
       corpus: info.corpus,

@@ -109,7 +109,13 @@
     }
     const panoId = String(context.panoId || raw.panoId || "");
     if (!panoId) throw new Error("Modal C-RADIO response has no panorama ID");
-    const origin = coordinates(context);
+    // Distances are measured from the panorama being asked about. The caller
+    // usually supplies it, but the guess-side cloud is adapted from a context
+    // that has no coordinates at all - so every distance came out as
+    // `Number(null || 0)`, which is 0, and every guess-side match claimed to be
+    // 0 m from its anchor. The response knows where it is; use that when the
+    // context does not say.
+    const origin = coordinates(context) || coordinates(raw);
     const datasetKey = String(context.datasetKey || "balanced-world-50k");
     const allMatches = raw.matches.map((item, index) => {
       const point = coordinates(item);
@@ -472,7 +478,13 @@
             estimated = true;
           }
         }
-        const adapted = adaptResponse(raw, { ...context, panoId: raw.panoId });
+        const adapted = adaptResponse(raw, {
+          ...context,
+          panoId: raw.panoId,
+          // the anchor is the origin for this cloud's distances
+          latitude: anchor.latitude,
+          longitude: anchor.longitude,
+        });
         return {
           ...adapted,
           guessAnchor: {
