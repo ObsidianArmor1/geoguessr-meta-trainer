@@ -16,6 +16,8 @@
   // and jsDelivr refuses files over 20 MB.
   const CHUNK_BASE =
     "https://cdn.jsdelivr.net/gh/ObsidianArmor1/lodestar-neighbors@main/neighbors/";
+  const HEADINGS_URL =
+    "https://raw.githubusercontent.com/ObsidianArmor1/lodestar-neighbors/main/headings.bin.gz";
   const MANIFEST_URL =
     "https://raw.githubusercontent.com/ObsidianArmor1/lodestar-neighbors/main/manifest.json";
   const DB_NAME = "lodestar-pack-v1";
@@ -43,6 +45,7 @@
   const MIN_MATCHES = 10;
 
   let directoryPromise = null;
+  let headingsPromise = null;
   let manifestPromise = null;
   const chunkCache = new Map();          // chunk index -> decoded arrays
 
@@ -273,6 +276,30 @@
   // nearest panorama in the MAP to the player's guess and drew its
   // neighbourhood. The corpus is no longer the map, so "nearest in the map"
   // becomes "nearest in the corpus", which is strictly more available.
+  // Each panorama's own spawn heading, fetched only when something needs to be
+  // rendered. View 0 of the corpus looks along the road at this heading, so a
+  // match displayed here matches the framing it was embedded at - which is what
+  // makes a side-by-side comparison honest rather than two arbitrary crops.
+  function headings() {
+    if (headingsPromise) return headingsPromise;
+    headingsPromise = (async () => {
+      const info = await manifest();
+      if (!info.headings) return null;
+      const packed = await cached("headings", () => request(HEADINGS_URL, "arraybuffer"));
+      const plain = await gunzip(packed);
+      return new Uint16Array(plain);
+    })().catch((error) => {
+      console.warn("[lodestar] headings unavailable:", error && error.message);
+      return null;
+    });
+    return headingsPromise;
+  }
+
+  async function headingOf(row) {
+    const table = await headings();
+    return table ? table[row] / 100 : null;
+  }
+
   async function nearest(latitude, longitude, options = {}) {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
     const dir = await directory();
@@ -326,6 +353,7 @@
     const wanted = Math.max(1, Math.min(Number(count) || k, k));
     const chunk = await chunkFor(row, info);
     const offset = (row - chunk.start) * k;
+    const heading = await headings();
     const matches = [];
     for (let rank = 0; rank < wanted; rank += 1) {
       const target = chunk.indices[offset + rank];
@@ -337,6 +365,8 @@
           dir.ids.subarray(target * ID_BYTES, (target + 1) * ID_BYTES)),
         latitude: dir.coords[target * 2] / COORD_SCALE,
         longitude: dir.coords[target * 2 + 1] / COORD_SCALE,
+        // the framing this panorama was embedded at, for like-for-like display
+        heading: heading ? heading[target] / 100 : null,
       });
     }
     const similarities = matches.map((match) => match.similarity);
@@ -344,6 +374,7 @@
     return {
       status: "complete",
       panoId: String(panoId),
+      heading: heading ? heading[row] / 100 : null,
       cacheHit: false,
       source: "lodestar-static-pack",
       corpus: info.corpus,
@@ -366,7 +397,7 @@
   }
 
   root.LodestarPack = {
-    query, queryRow, nearest, directory, boundary, adaptiveCount,
-    sphericalClick, half, haversineKm,
+    query, queryRow, nearest, directory, headings, headingOf, boundary,
+    adaptiveCount, sphericalClick, half, haversineKm,
   };
 })(typeof window !== "undefined" ? window : globalThis);
