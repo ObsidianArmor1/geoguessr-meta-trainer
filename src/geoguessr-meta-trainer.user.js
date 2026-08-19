@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.33
+// @version      2.2.0-beta.34
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -364,9 +364,8 @@
   }
 
   function mapLegend(neighborhood) {
-    const guess = state.showVisualNeighbors && state.showGuessNeighbors
-      ? state.guessNeighborhood
-      : null;
+    // The legend follows the layers, each independently
+    const guess = state.showGuessNeighbors ? state.guessNeighborhood : null;
     const overlap = guess?.overlap;
     return `<div class="omt-legend">${state.showVisualNeighbors && neighborhood?.visualMatches?.length ? `<i class="omt-legend-match omt-legend-round-match"></i> closest matches <i class="omt-legend-match omt-legend-tail-match"></i> wider distribution <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click` : ""}${guess ? `<i class="omt-legend-match omt-legend-guess-match"></i> guess matches <i class="omt-legend-match omt-legend-shared-match"></i> shared${overlap ? ` (${overlap.sharedLocations})` : ""}` : ""}<i class="omt-legend-current"></i> round</div>`;
   }
@@ -1299,10 +1298,9 @@
     // corpus coordinate, so it is served by loadGuessNeighborhood below.
     state.showGuessNeighbors = Boolean(enabled);
     saveMapLayerPreferences();
-    if (state.showGuessNeighbors && !state.showVisualNeighbors) {
-      state.showVisualNeighbors = true;
-      saveMapLayerPreferences();
-    }
+    // Turning the guess cloud on used to force the round cloud on with it, from
+    // when this was an overlay ON the round matches rather than a layer of its
+    // own. With a button for each, G is expected to move one of them.
     render();
     if (state.showGuessNeighbors) {
       loadGuessNeighborhood(state.requestToken);
@@ -3283,13 +3281,15 @@
     // here rather than at fetch time means the setting applies instantly to a
     // round already on screen, with nothing to re-request or re-cache.
     const shown = state.matchCount;
-    const visualMatches = (context.visualNeighborhood?.visualMatches || []).slice(0, shown);
-    const guessComparison = state.showVisualNeighbors && state.showGuessNeighbors
-      ? state.guessNeighborhood
-      : null;
+    const visualMatches = state.showVisualNeighbors
+      ? (context.visualNeighborhood?.visualMatches || []).slice(0, shown)
+      : [];
+    // Independent of the round layer: the guess cloud used to be drawn only
+    // when the round cloud was on, so "guess alone" could not be shown at all.
+    const guessComparison = state.showGuessNeighbors ? state.guessNeighborhood : null;
     const guessMatches = (guessComparison?.visualNeighborhood?.visualMatches || [])
       .slice(0, shown);
-    if (state.showVisualNeighbors && visualMatches.length) {
+    if (visualMatches.length || guessMatches.length) {
       const combined = new Map();
       // The core cannot exceed what is drawn: at a small count every dot shown
       // is a close match, and marking none of them as core would be wrong.
