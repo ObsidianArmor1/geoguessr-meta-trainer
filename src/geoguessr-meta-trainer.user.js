@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.14
+// @version      2.2.0-beta.15
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -103,6 +103,10 @@
     neighborDots: "#ff334f",
     neighborClick: "#ff00a8",
     guessDots: "#244cff",
+    // Bands default to 40% of full strength. At 100% the overlay is three
+    // filled levels per cloud plus 300 dots, which reads as overwhelming on a
+    // detailed basemap; 40% keeps the shape legible and lets the map through.
+    bandIntensity: 0.4,
   };
   const LEGACY_GUESS_DOT_COLOR = "#9b6cff";
   const liveChallengeAdapter = globalThis.OMTLiveChallenge;
@@ -177,6 +181,11 @@
     showVisualNeighbors: mapLayerPreferences.showVisualNeighbors,
     showGuessNeighbors: mapLayerPreferences.showGuessNeighbors,
     neighborDotColor: mapColorPreferences.neighborDots,
+    // How strongly the similarity-mass bands are painted, 0 turns them off and
+    // leaves the dots alone. Three filled bands per cloud, two clouds and 300
+    // dots is a lot of ink at full strength, and how much is too much depends
+    // on the map underneath and the player.
+    bandIntensity: mapColorPreferences.bandIntensity,
     neighborClickColor: mapColorPreferences.neighborClick,
     guessDotColor: mapColorPreferences.guessDots,
     matchTooltip: null,
@@ -264,10 +273,16 @@
         guessDots: storedGuessDots === LEGACY_GUESS_DOT_COLOR
           ? DEFAULT_MAP_COLORS.guessDots
           : storedGuessDots,
+        bandIntensity: normalizeIntensity(stored?.bandIntensity, DEFAULT_MAP_COLORS.bandIntensity),
       };
     } catch (_error) {
       return { ...DEFAULT_MAP_COLORS };
     }
+  }
+
+  function normalizeIntensity(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : fallback;
   }
 
   function saveMapColorPreferences() {
@@ -275,6 +290,7 @@
       neighborDots: state.neighborDotColor,
       neighborClick: state.neighborClickColor,
       guessDots: state.guessDotColor,
+      bandIntensity: state.bandIntensity,
     }));
   }
 
@@ -1136,7 +1152,7 @@
           <div class="omt-toolbar"><button class="omt-compare-button" id="omt-compare">Compare views <kbd>V</kbd></button><button id="omt-mode-cycle">${mapModeLabel()} <kbd>M</kbd></button><button class="omt-fit" id="omt-fit">Fit map</button></div>
           <div class="omt-scroll">
             ${neighborhoodHtml}
-            <section class="omt-section"><div class="omt-section-head"><h3>Map overlays</h3><span>saved between rounds</span></div><div class="omt-map-actions"><label class="omt-layer-toggle"><input type="checkbox" id="omt-best-meta" ${state.showBestMeta ? "checked" : ""}>Families</label><label class="omt-layer-toggle"><input type="checkbox" id="omt-neighbors" ${state.showVisualNeighbors ? "checked" : ""}>Round matches</label><label class="omt-layer-toggle" title="Compare the visual neighborhood near your guess with the revealed location"><input type="checkbox" id="omt-guess-neighbors" ${state.showGuessNeighbors ? "checked" : ""} ${state.playerGuess ? "" : "disabled"}>Guess comparison</label><label class="omt-color-setting">Round <input type="color" id="omt-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Guess <input type="color" id="omt-guess-dot-color" value="${state.guessDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-click-color" value="${state.neighborClickColor}"></label></div>${guessComparisonHtml}<div class="omt-click-lines">${clickLines || ""}</div></section>
+            <section class="omt-section"><div class="omt-section-head"><h3>Map overlays</h3><span>saved between rounds</span></div><div class="omt-map-actions"><label class="omt-layer-toggle"><input type="checkbox" id="omt-best-meta" ${state.showBestMeta ? "checked" : ""}>Families</label><label class="omt-layer-toggle"><input type="checkbox" id="omt-neighbors" ${state.showVisualNeighbors ? "checked" : ""}>Round matches</label><label class="omt-layer-toggle" title="Compare the visual neighborhood near your guess with the revealed location"><input type="checkbox" id="omt-guess-neighbors" ${state.showGuessNeighbors ? "checked" : ""} ${state.playerGuess ? "" : "disabled"}>Guess comparison</label><label class="omt-color-setting">Round <input type="color" id="omt-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Guess <input type="color" id="omt-guess-dot-color" value="${state.guessDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-click-color" value="${state.neighborClickColor}"></label><label class="omt-color-setting" title="How strongly the similarity-mass bands are painted. Zero shows dots only.">Cloud <input type="range" id="omt-band-intensity" min="0" max="100" step="5" value="${Math.round(state.bandIntensity * 100)}" style="width:74px"></label></div>${guessComparisonHtml}<div class="omt-click-lines">${clickLines || ""}</div></section>
             <section class="omt-section"><div class="omt-section-head"><h3>Matched families</h3><span>${metas.length} shown${review.moreMetas?.length ? ` · ${review.moreMetas.length} more` : ""}</span></div><nav class="omt-nav"><button id="omt-prev" ${state.active === 0 ? "disabled" : ""}>←</button><select id="omt-select" aria-label="Active family">${optionHtml}</select><button id="omt-next" ${state.active === metas.length - 1 ? "disabled" : ""}>→</button></nav>${review.moreMetas?.length ? `<button class="omt-more" id="omt-more">Add next family (${review.moreMetas.length} remaining)</button>` : ""}<div class="omt-family-head"><div><h2>${esc(familyDisplayTitle(meta))}</h2><p>${agreement}</p></div><span class="omt-strength">${esc(strengthLabel)}</span></div><div class="omt-metrics"><div class="omt-metric"><b>${(meta.bits || 0).toFixed(2)}</b><span>location bits</span></div><div class="omt-metric"><b>${meta.members.toLocaleString()}</b><span>family locations</span></div><div class="omt-metric"><b>${Number.isFinite(meta.repeatability) ? `${Math.round(meta.repeatability * 100)}%` : "—"}</b><span>replicated</span></div></div>${usefulFamilyDescription(meta) ? `<p class="omt-description">${esc(usefulFamilyDescription(meta))}</p>` : ""}${filtered ? `<details class="omt-system-details"><summary>Filtering details</summary>${esc(filtered)}</details>` : ""}</section>
             <section class="omt-section"><div class="omt-section-head"><h3>This round</h3><span>${viewEvidence ? "family evidence by direction" : "four stored directions"}</span></div><div class="omt-views">${viewHtml}</div></section>
             <section class="omt-section"><div class="omt-section-head"><h3>Family examples</h3><span>this round + eight representative views</span></div><button class="omt-evidence" data-image="${esc(representativeViews)}" data-label="${esc(familyDisplayTitle(meta))} · representative views"><img data-src="${esc(representativeViews)}" alt="Representative views for ${esc(familyDisplayTitle(meta))}"></button><p class="omt-note">${esc(evidenceNote)}</p></section>
@@ -1187,6 +1203,11 @@
     });
     state.shadow.getElementById("omt-click-color")?.addEventListener("input", (event) => {
       setMapColor("click", event.target.value);
+    });
+    state.shadow.getElementById("omt-band-intensity")?.addEventListener("input", (event) => {
+      state.bandIntensity = normalizeIntensity(Number(event.target.value) / 100, 0.4);
+      saveMapColorPreferences();
+      showMetaOnMap(false);
     });
     state.shadow.getElementById("omt-guess-dot-color")?.addEventListener("input", (event) => {
       setMapColor("guess", event.target.value);
@@ -2433,10 +2454,11 @@
   }
 
 
-  function drawMassBands(context, width, height, samples, hex) {
+  function drawMassBands(context, width, height, samples, hex, intensity = 1) {
     // Below a handful of points a density estimate says more about the
     // bandwidth than about the data, so draw nothing and let the dots speak.
     if (!samples.length || samples.length < 12 || width < 8 || height < 8) return;
+    if (!(intensity > 0)) return;
     const columns = Math.ceil(width / BAND_CELL);
     const rows = Math.ceil(height / BAND_CELL);
     const field = bandField(columns * rows);
@@ -2483,9 +2505,9 @@
     // ImageData is on every platform this runs on.
     const rgb = (b << 16) | (g << 8) | r;
     const shades = [
-      ((Math.round(BAND_ALPHA[0] * 255) << 24) | rgb) >>> 0,
-      ((Math.round(BAND_ALPHA[1] * 255) << 24) | rgb) >>> 0,
-      ((Math.round(BAND_ALPHA[2] * 255) << 24) | rgb) >>> 0,
+      ((Math.round(BAND_ALPHA[0] * intensity * 255) << 24) | rgb) >>> 0,
+      ((Math.round(BAND_ALPHA[1] * intensity * 255) << 24) | rgb) >>> 0,
+      ((Math.round(BAND_ALPHA[2] * intensity * 255) << 24) | rgb) >>> 0,
     ];
     const cells = columns * rows;
     for (let i = 0; i < cells; i += 1) {
@@ -2505,7 +2527,7 @@
     const scaleY = height / rows;
     context.save();
     context.lineJoin = "round";
-    [[middle, 0.46, 0.9], [inner, 0.7, 1.1]].forEach(
+    [[middle, 0.46 * intensity, 0.9], [inner, 0.7 * intensity, 1.1]].forEach(
       ([threshold, alpha, lineWidth]) => {
         const count = isolineSegments(field, columns, rows, threshold);
         if (!count) return;
@@ -2785,8 +2807,10 @@
               });
             }
           }
-          drawMassBands(context, width, height, roundSamples, state.neighborDotColor);
-          drawMassBands(context, width, height, guessSamples, state.guessDotColor);
+          drawMassBands(context, width, height, roundSamples, state.neighborDotColor,
+            state.bandIntensity);
+          drawMassBands(context, width, height, guessSamples, state.guessDotColor,
+            state.bandIntensity);
 
           for (const point of rankedPoints) {
             const pixel = viewportPoint(point);
