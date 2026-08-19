@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.10
+// @version      2.2.0-beta.11
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -546,6 +546,22 @@
     }
     const value = query.toString();
     return `${meta.assets.examples}${value ? `?${value}` : ""}`;
+  }
+
+  // The same geometry the corpus was embedded with: 448x256, fov 90, pitch 0,
+  // offsets from the panorama's own spawn heading. Anything else would show a
+  // different framing from the one the similarity was computed on.
+  function corpusViewUrl(panoId, heading, width = 448, height = 256) {
+    const query = new URLSearchParams({
+      cb_client: "apiv3",
+      w: String(width),
+      h: String(height),
+      pitch: "0",
+      thumbfov: "90",
+      panoid: String(panoId),
+      yaw: String(((Number(heading) || 0) % 360 + 360) % 360),
+    });
+    return `https://streetviewpixels-pa.googleapis.com/v1/thumbnail?${query}`;
   }
 
   function viewSuffix(point) {
@@ -1907,6 +1923,11 @@
       let row;
       if (point.current && point.panoId && Array.isArray(point.headings)) {
         row = { p: point.panoId, h: point.headings };
+      } else if (Number.isFinite(point.heading) && point.panoId) {
+        // Shift-to-enlarge went through the dataset too, so it failed wherever
+        // the preview did. The four directions are the spawn heading plus the
+        // same offsets the corpus was embedded with.
+        row = { p: point.panoId, h: [0, 90, 180, 270].map((offset) => (point.heading + offset) % 360) };
       } else {
         const datasetKey = point.datasetKey || state.review?.datasetKey;
         const map = await portableApi.loadMap(datasetKey);
@@ -1989,11 +2010,17 @@
     state.matchTooltipPoint = point;
     if (state.matchTooltipShift) ensureMatchTooltipHighResolution(tooltip, point);
     try {
+      // /api/view is served by a map dataset. The corpus path has none, so
+      // every match preview failed there and read "Preview unavailable". The
+      // pack carries each panorama's own spawn heading, which is all four
+      // directions need: the corpus was embedded at 0/90/180/270 from it.
       const urls = point.current && Array.isArray(point.viewUrls)
         ? point.viewUrls
-        : await Promise.all([0, 1, 2, 3].map((slot) =>
-          imageUrl(`/api/view/${point.mapIndex}/${slot}${viewSuffix(point)}`)
-        ));
+        : Number.isFinite(point.heading) && point.panoId
+          ? [0, 90, 180, 270].map((offset) => corpusViewUrl(point.panoId, point.heading + offset))
+          : await Promise.all([0, 1, 2, 3].map((slot) =>
+            imageUrl(`/api/view/${point.mapIndex}/${slot}${viewSuffix(point)}`)
+          ));
       if (token !== state.matchTooltipToken || !tooltip.isConnected) return;
       const imageLabel = point.current
         ? "This round"
@@ -2247,6 +2274,9 @@
             datasetKey: value.datasetKey || options.datasetKey || "",
             comparisonSide: value.comparisonSide || options.comparisonSide || "round",
             core: value.core === true,
+            // the panorama's own spawn heading, so a preview can be built
+            // without a dataset behind /api/view
+            heading: Number.isFinite(Number(value.heading)) ? Number(value.heading) : null,
             roundRank: Number(value.roundRank || 0),
             guessRank: Number(value.guessRank || 0),
             roundSimilarity: Number(value.roundSimilarity || 0),
