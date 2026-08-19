@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.31
+// @version      2.2.0-beta.32
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -1886,11 +1886,11 @@
         // to the round had never been measured, which reads as "nothing alike"
         // rather than "not measured".
         // null and undefined must not survive Number(): both coerce to 0, which
-        // would print "0.000 panorama similarity" for something never measured.
+        // would print "0.0% similar" for something never measured.
         const strength = item.viewSimilarity === null || item.viewSimilarity === undefined
           || !Number.isFinite(Number(item.viewSimilarity))
           ? ""
-          : `${Number(item.viewSimilarity).toFixed(3)} ${mode.similarityLabel || "view similarity"} · `;
+          : `${similarityText(item.viewSimilarity)} · `;
         const detail = `${strength}${distance} from guess${rank ? ` · ${rank}` : ""}`;
         return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess</span><em>${esc(detail)}</em></button>`;
       }
@@ -1898,7 +1898,7 @@
         ? `${Math.round(item.distanceKm * 1000)} m`
         : `${item.distanceKm.toFixed(1)} km`;
       const label = `Visual match #${item.rank}${item.reciprocal ? " · mutual match" : ""}`;
-      const detail = `${Number(item.viewSimilarity).toFixed(3)} ${mode.similarityLabel || "view similarity"} · ${distance}`;
+      const detail = `${similarityText(item.viewSimilarity)} · ${distance}`;
       return `<button class="omt-board-match" data-board-entry="${item.mapIndex}" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Visual match ${item.rank}"><span>#${item.rank}${item.reciprocal ? " · mutual" : ""}</span><em>${esc(detail)}</em></button>`;
     }).join("");
     const interpretation = board.corpus
@@ -2122,6 +2122,14 @@
   //
   // Distance means something different on each side - from the round, or from
   // the panorama the guess cloud is built around - so it now says which.
+  // Similarity as a percentage. Cosine values live in a narrow band - the
+  // interesting range across a board is roughly 0.85 to 0.95 - so a decimal
+  // place is kept, or every tile would read 90-something percent and the
+  // ordering would be invisible.
+  function similarityText(value) {
+    return `${(Number(value) * 100).toFixed(1)}% similar`;
+  }
+
   function matchTooltipHeading(point, distance) {
     const roundRank = Number(point.roundRank || point.rank) || 0;
     const guessRank = Number(point.guessRank || point.rank) || 0;
@@ -2129,15 +2137,15 @@
     const guessSimilarity = Number(point.guessSimilarity || point.similarity) || 0;
     if (point.comparisonSide === "both") {
       return `<b>In both clouds</b><span>`
-        + `#${roundRank} most similar to this round · ${roundSimilarity.toFixed(3)}<br>`
-        + `#${guessRank} most similar to your guess anchor · ${guessSimilarity.toFixed(3)}</span>`;
+        + `#${roundRank} most similar to this round · ${similarityText(roundSimilarity)}<br>`
+        + `#${guessRank} most similar to your guess anchor · ${similarityText(guessSimilarity)}</span>`;
     }
     if (point.comparisonSide === "guess") {
       return `<b style="color:${esc(state.guessDotColor)}">#${guessRank} most similar to your guess anchor</b>`
-        + `<span>similarity ${guessSimilarity.toFixed(3)} · ${esc(distance)} from the anchor</span>`;
+        + `<span>${similarityText(guessSimilarity)} · ${esc(distance)} from the anchor</span>`;
     }
     return `<b style="color:${esc(state.neighborDotColor)}">#${roundRank} most similar to this round</b>`
-      + `<span>similarity ${roundSimilarity.toFixed(3)} · ${esc(distance)} from the round</span>`;
+      + `<span>${similarityText(roundSimilarity)} · ${esc(distance)} from the round</span>`;
   }
 
   function positionMatchTooltip(tooltip, clientX, clientY) {

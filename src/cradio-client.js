@@ -600,7 +600,6 @@
           currentSlot: 0,
           currentHeading: Math.round(roundHeading),
           currentView: thumbnail(review.location?.panoId || "", roundHeading),
-          similarityLabel: "panorama similarity",
           entries: (guessMatch
           ? matches.filter((match) => match.panoId !== guessMatch.panoId).slice(0, tiles - 1)
           : matches.slice(0, tiles)).map(entry),
