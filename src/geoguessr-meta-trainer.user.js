@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.12
+// @version      2.2.0-beta.13
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -2275,6 +2275,166 @@
     state.overlays = [];
   }
 
+  // ---- similarity-mass contours -------------------------------------------
+  //
+  // Three hundred dots at continental scale overlap into a smear, and the thing
+  // that smear hides is the shape: a cloud holding 31% of its mass in one
+  // region and 17% in another is a different round from one holding 80% in a
+  // single place. The bands say it directly - each encloses a share of the
+  // SIMILARITY MASS, not a count, so they are weighted by the same posterior
+  // that steers the suggested click.
+  //
+  // The bandwidth is in screen pixels rather than degrees, so the cloud stays
+  // coherent while zooming instead of dissolving into separate blobs.
+  const MASS_BANDS = [0.95, 0.8, 0.5];
+  const BAND_ALPHA = [0.13, 0.2, 0.3];
+
+  function rgbOf(hex) {
+    const value = String(hex || "").replace("#", "");
+    const full = value.length === 3
+      ? value.split("").map((c) => c + c).join("")
+      : value.padEnd(6, "0").slice(0, 6);
+    const number = parseInt(full, 16);
+    return [(number >> 16) & 255, (number >> 8) & 255, number & 255];
+  }
+
+  // Density values enclosing given shares of the total mass, densest first.
+  //
+  // One descending pass over the sorted cells: the tightest share is reached
+  // first and has the highest cut, and each later share continues from there.
+  // Walking the shares the other way round makes every band land on the same
+  // threshold, because the running total has already passed them all.
+  function massThresholds(field, total, shares) {
+    const sorted = Float32Array.from(field).sort().reverse();
+    const ascending = [...shares].sort((a, b) => a - b);
+    const cuts = [];
+    let running = 0;
+    let index = 0;
+    for (const share of ascending) {
+      while (index < sorted.length && running < share * total) {
+        running += sorted[index];
+        index += 1;
+      }
+      cuts.push(sorted[Math.max(0, index - 1)]);
+    }
+    return cuts;
+  }
+
+  // Isolines for one threshold, by marching squares over the density grid.
+  //
+  // The filled bands alone read as a heatmap: smoothing blurs the three levels
+  // into one gradient and the boundaries - the informative part, since each is
+  // a stated share of the mass - disappear. A stroked line puts them back.
+  function isolineSegments(field, columns, rows, threshold) {
+    const segments = [];
+    const at = (x, y) => field[y * columns + x];
+    // where the contour crosses an edge, by linear interpolation
+    const cross = (ax, ay, av, bx, by, bv) => {
+      const t = (threshold - av) / ((bv - av) || 1e-9);
+      return [ax + (bx - ax) * t, ay + (by - ay) * t];
+    };
+    for (let y = 0; y < rows - 1; y += 1) {
+      for (let x = 0; x < columns - 1; x += 1) {
+        const tl = at(x, y);
+        const tr = at(x + 1, y);
+        const br = at(x + 1, y + 1);
+        const bl = at(x, y + 1);
+        const code = (tl >= threshold ? 8 : 0) | (tr >= threshold ? 4 : 0)
+          | (br >= threshold ? 2 : 0) | (bl >= threshold ? 1 : 0);
+        if (code === 0 || code === 15) continue;
+        const top = () => cross(x, y, tl, x + 1, y, tr);
+        const right = () => cross(x + 1, y, tr, x + 1, y + 1, br);
+        const bottom = () => cross(x, y + 1, bl, x + 1, y + 1, br);
+        const left = () => cross(x, y, tl, x, y + 1, bl);
+        const pairs = {
+          1: [[left, bottom]], 2: [[bottom, right]], 3: [[left, right]],
+          4: [[top, right]], 5: [[left, top], [bottom, right]], 6: [[top, bottom]],
+          7: [[left, top]], 8: [[left, top]], 9: [[top, bottom]],
+          10: [[left, bottom], [top, right]], 11: [[top, right]],
+          12: [[left, right]], 13: [[bottom, right]], 14: [[left, bottom]],
+        }[code] || [];
+        for (const [from, to] of pairs) segments.push([from(), to()]);
+      }
+    }
+    return segments;
+  }
+
+  function drawMassBands(context, width, height, samples, hex) {
+    // Below a handful of points a density estimate says more about the
+    // bandwidth than about the data, so draw nothing and let the dots speak.
+    if (!samples.length || samples.length < 12 || width < 8 || height < 8) return;
+    const cell = 6;
+    const columns = Math.ceil(width / cell);
+    const rows = Math.ceil(height / cell);
+    const field = new Float32Array(columns * rows);
+    const sigma = 4.2;                       // cells; ~25 px
+    const reach = Math.ceil(sigma * 2.6);
+    const denominator = 2 * sigma * sigma;
+    let total = 0;
+    for (const sample of samples) {
+      const cx = sample.x / cell;
+      const cy = sample.y / cell;
+      const left = Math.max(0, Math.floor(cx - reach));
+      const right = Math.min(columns - 1, Math.ceil(cx + reach));
+      const top = Math.max(0, Math.floor(cy - reach));
+      const bottom = Math.min(rows - 1, Math.ceil(cy + reach));
+      for (let gy = top; gy <= bottom; gy += 1) {
+        const dy = gy + 0.5 - cy;
+        for (let gx = left; gx <= right; gx += 1) {
+          const dx = gx + 0.5 - cx;
+          const value = sample.weight * Math.exp(-(dx * dx + dy * dy) / denominator);
+          field[gy * columns + gx] += value;
+          total += value;
+        }
+      }
+    }
+    if (!(total > 0)) return;
+    const [inner, middle, outer] = massThresholds(field, total, MASS_BANDS);
+    const [r, g, b] = rgbOf(hex);
+    const image = context.createImageData(columns, rows);
+    for (let i = 0; i < field.length; i += 1) {
+      const value = field[i];
+      const alpha = value >= inner ? BAND_ALPHA[2]
+        : value >= middle ? BAND_ALPHA[1]
+          : value >= outer ? BAND_ALPHA[0] : 0;
+      if (!alpha) continue;
+      const at = i * 4;
+      image.data[at] = r;
+      image.data[at + 1] = g;
+      image.data[at + 2] = b;
+      image.data[at + 3] = Math.round(alpha * 255);
+    }
+    const buffer = document.createElement("canvas");
+    buffer.width = columns;
+    buffer.height = rows;
+    buffer.getContext("2d").putImageData(image, 0, 0);
+    context.save();
+    context.imageSmoothingEnabled = true;      // smooth bands, not visible cells
+    context.imageSmoothingQuality = "high";
+    context.drawImage(buffer, 0, 0, width, height);
+    context.restore();
+
+    // and the boundaries themselves, so each band is legible as a line
+    const scaleX = width / columns;
+    const scaleY = height / rows;
+    context.save();
+    context.lineJoin = "round";
+    [[outer, 0.34, 0.8], [middle, 0.48, 0.9], [inner, 0.7, 1.1]].forEach(
+      ([threshold, alpha, lineWidth]) => {
+        const segments = isolineSegments(field, columns, rows, threshold);
+        if (!segments.length) return;
+        context.beginPath();
+        for (const [[ax, ay], [bx, by]] of segments) {
+          context.moveTo((ax + 0.5) * scaleX, (ay + 0.5) * scaleY);
+          context.lineTo((bx + 0.5) * scaleX, (by + 0.5) * scaleY);
+        }
+        context.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+        context.lineWidth = lineWidth;
+        context.stroke();
+      });
+    context.restore();
+  }
+
   function distributionOverlay(maps, map, coordinates, options = {}) {
     if (!maps.OverlayView) return null;
     const mercatorY = (latitude) => {
@@ -2512,6 +2672,36 @@
             (this.points.length <= 100 ? 3.8 : this.points.length <= 300 ? 3.5 : 3.1)
               + (zoom - 8) * 0.07,
           ));
+          // Bands first, so the dots sit on top of their own distribution.
+          // Round-side and guess-side are separate fields in their own colours:
+          // two clouds compared is the whole point of the guess comparison.
+          const roundSamples = [];
+          const guessSamples = [];
+          for (const point of this.points) {
+            const pixel = viewportPoint(point);
+            if (pixel.x < -60 || pixel.x > width + 60
+              || pixel.y < -60 || pixel.y > height + 60) continue;
+            const rank = Number(point.roundRank || point.rank || 0);
+            const guessRank = Number(point.guessRank || point.rank || 0);
+            if (point.comparisonSide !== "guess") {
+              roundSamples.push({
+                x: pixel.x,
+                y: pixel.y,
+                weight: Number(point.roundPosteriorWeight || point.posteriorWeight)
+                  || 1 / (rank + 10),
+              });
+            }
+            if (point.comparisonSide === "guess" || point.comparisonSide === "both") {
+              guessSamples.push({
+                x: pixel.x,
+                y: pixel.y,
+                weight: Number(point.posteriorWeight) || 1 / (guessRank + 10),
+              });
+            }
+          }
+          drawMassBands(context, width, height, roundSamples, state.neighborDotColor);
+          drawMassBands(context, width, height, guessSamples, state.guessDotColor);
+
           for (const point of rankedPoints) {
             const pixel = viewportPoint(point);
             if (pixel.x < -18 || pixel.x > width + 18 || pixel.y < -18 || pixel.y > height + 18) continue;
