@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.32
+// @version      2.2.0-beta.33
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -207,6 +207,7 @@
     matchTooltipNative: [],
     boardWarmTimer: 0,
     boardPrewarmTimer: 0,
+    dockColorsOpen: false,
     guessPrefetchKey: "",
     guessPrefetchTimer: 0,
     matchTooltipTimer: 0,
@@ -828,6 +829,8 @@
     .omt-dock-status::before { content:""; width:7px; height:7px; margin-right:8px; border-radius:50%; background:#c97a64; }
     .omt-dock-status.pending::before { background:#71a7ff; animation:omt-pulse 1.1s ease-in-out infinite alternate; }
     @keyframes omt-pulse { to { opacity:.32; } }
+    .omt-dock-swatch { display:inline-block; width:9px; height:9px; margin-right:6px; border:1px solid #ffffff55; border-radius:50%; }
+    .omt-dock button.active .omt-dock-swatch { box-shadow:0 0 0 2px #ffffff35; }
     .omt-dock-settings { position:relative; display:flex; align-items:stretch; border-left:1px solid var(--line); }
     .omt-dock-settings summary { display:flex; align-items:center; min-height:40px; padding:8px 12px; color:#d9dbe0; cursor:pointer; font-weight:650; list-style:none; }
     .omt-dock-settings summary::-webkit-details-marker { display:none; }
@@ -1055,13 +1058,16 @@
       ? `<button class="omt-dock-primary" id="omt-compare-launch">Compare views <kbd>V</kbd></button>`
       : "";
     const mode = review.visualNeighborhood
-      ? `<button id="omt-mode-cycle" title="Toggle similarity map">${mapModeLabel()} <kbd>M</kbd></button>`
+      ? `<button id="omt-mode-cycle" class="${state.showVisualNeighbors ? "active" : ""}" title="Show or hide the round's cloud"><i class="omt-dock-swatch" style="background:${esc(state.neighborDotColor)}"></i>Round <kbd>M</kbd></button>`
       : "";
-    const guess = review.visualNeighborhood && !review.universal
-      ? `<button id="omt-guess-cycle" class="${state.showGuessNeighbors ? "active" : ""}" title="Compare the visual neighborhood near your guess with the revealed location" ${state.playerGuess ? "" : "disabled"}>Guess ${state.showGuessNeighbors ? "on" : "off"} <kbd>G</kbd></button>`
+    // The guess cloud is available on the corpus path too - it was gated here
+    // and on the G key long after the feature itself stopped needing a dataset,
+    // so the only way to toggle it was the checkbox in the drawer.
+    const guess = review.visualNeighborhood
+      ? `<button id="omt-guess-cycle" class="${state.showGuessNeighbors ? "active" : ""}" title="Show or hide the cloud around your guess" ${state.playerGuess ? "" : "disabled"}><i class="omt-dock-swatch" style="background:${esc(state.guessDotColor)}"></i>Guess <kbd>G</kbd></button>`
       : "";
     const settings = review.visualNeighborhood
-      ? `<details class="omt-dock-settings"><summary>Colors</summary><div class="omt-dock-settings-panel"><label class="omt-color-setting">Round <input type="color" id="omt-dock-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Guess <input type="color" id="omt-dock-guess-dot-color" value="${state.guessDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-dock-click-color" value="${state.neighborClickColor}"></label></div></details>`
+      ? `<details class="omt-dock-settings" id="omt-dock-colors"${state.dockColorsOpen ? " open" : ""}><summary>Colors</summary><div class="omt-dock-settings-panel"><label class="omt-color-setting">Round <input type="color" id="omt-dock-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Guess <input type="color" id="omt-dock-guess-dot-color" value="${state.guessDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-dock-click-color" value="${state.neighborClickColor}"></label></div></details>`
       : "";
     return `<div class="omt-dock">${compare}${mode}${guess}${settings}</div>`;
   }
@@ -1071,6 +1077,12 @@
     state.shadow.getElementById("omt-mode-cycle")?.addEventListener("click", cycleMapLayers);
     state.shadow.getElementById("omt-guess-cycle")?.addEventListener("click", () => {
       setGuessComparison(!state.showGuessNeighbors);
+    });
+    // Remember whether it was open, or the next render - which happens on map
+    // idle, on hover, on almost anything - silently closes it again. That is
+    // why the button looked like it did nothing.
+    state.shadow.getElementById("omt-dock-colors")?.addEventListener("toggle", (event) => {
+      state.dockColorsOpen = event.target.open;
     });
     state.shadow.getElementById("omt-dock-dot-color")?.addEventListener("input", (event) => {
       setMapColor("dots", event.target.value);
@@ -1343,7 +1355,7 @@
       event.preventDefault();
       event.stopPropagation();
       if (state.visualBoardOpen) closeVisualBoard(); else openVisualBoard();
-    } else if (event.code === "KeyG" && state.playerGuess && !state.review.universal) {
+    } else if (event.code === "KeyG" && state.playerGuess) {
       event.preventDefault();
       event.stopPropagation();
       setGuessComparison(!state.showGuessNeighbors);
