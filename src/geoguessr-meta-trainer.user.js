@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.25
+// @version      2.2.0-beta.26
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -418,15 +418,8 @@
     }
     const id = String(panoId);
     if (modalRoundPromises.has(id)) return modalRoundPromises.get(id);
-    const pending = cradioClient.prefetch(id, context).then((result) => {
-      // Everything the V board will show except tile two, which depends on a
-      // guess that has not happened yet. Spread wide: the player is looking at
-      // a Street View panorama of their own, and building these is not free.
-      if (result?.ok && result.response?.universal) {
-        warmBoardPanoramas(cradioClient.buildVisualBoard(result.response, null), null, 450);
-      }
-      return result;
-    }).catch(() => ({ ok: false, reason: "network-error" }));
+    const pending = cradioClient.prefetch(id, context)
+      .catch(() => ({ ok: false, reason: "network-error" }));
     modalRoundPromises.set(id, pending);
     if (modalRoundPromises.size > 128) {
       modalRoundPromises.delete(modalRoundPromises.keys().next().value);
@@ -1792,70 +1785,6 @@
     return panorama;
   }
 
-  // Build a widget ahead of being asked for it, parked off-screen.
-  //
-  // Constructing a StreetViewPanorama is what costs the half second, so the
-  // trick is to have done it before the peek opens. Plain hover is the right
-  // moment: the pointer reaches a tile before shift goes down, and warming only
-  // what is hovered keeps the number of live widgets bounded by where the
-  // pointer has actually been.
-  function warmNativeStreetView(panoId, heading) {
-    if (!panoId || !pageWindow.google?.maps?.StreetViewPanorama) return;
-    const key = nativePanoKey(panoId, heading);
-    if (nativePanoCache.has(key)) return;
-    const host = document.createElement("div");
-    host.className = "omt-native-pano";
-    host.style.cssText = "width:100%;height:100%;";
-    nativePanoAtticElement().appendChild(host);
-    const panorama = nativeStreetView(host, panoId, heading);
-    if (!panorama) {
-      host.remove();
-      return;
-    }
-    nativePanoCache.set(key, { host, panorama, usedAt: Date.now() });
-    trimNativePanoCache();
-  }
-
-  // Build every panorama the V board will show, while the player is reading the
-  // round result.
-  //
-  // Constructing a StreetViewPanorama is what costs the half second, and doing
-  // it on hover means paying it for each tile the first time it is looked at.
-  // The board's contents are known as soon as the round resolves, so they are
-  // built then - by the time V is pressed, shift is instant on every tile.
-  //
-  // Spread out and run at idle: nine widgets constructed in one go stalls the
-  // result screen, which is exactly the moment this is meant to protect.
-  function warmBoardPanoramas(board, token, spacing = 90) {
-    if (!board) return;
-    const mode = board.modes?.find((item) => item.id === (board.defaultMode || "consensus"))
-      || board.modes?.[0];
-    if (!mode) return;
-    const tiles = [
-      { panoId: board.panoId, heading: mode.currentHeading },
-      ...(mode.guessMatch ? [mode.guessMatch] : []),
-      ...(mode.entries || []),
-    ].filter((tile) => tile && tile.panoId);
-    let index = 0;
-    const step = () => {
-      // A null token means "not tied to a round" - warming started during play
-      // should carry on into the result screen rather than stop when the round
-      // resolves and the token changes.
-      if ((token !== null && token !== state.requestToken) || index >= tiles.length) return;
-      const tile = tiles[index];
-      index += 1;
-      warmNativeStreetView(tile.panoId, Number(tile.heading) || 0);
-      // 90 ms apart: ten widgets are ready inside a second, which is faster
-      // than a player can read the result and press V, while still yielding to
-      // the page between each. Nesting a timeout inside requestIdleCallback -
-      // the first version - took over a second per widget and had built only
-      // four of ten after five seconds.
-      state.boardPrewarmTimer = window.setTimeout(step, spacing);
-    };
-    window.clearTimeout(state.boardPrewarmTimer);
-    state.boardPrewarmTimer = window.setTimeout(step, spacing * 3);
-  }
-
   // Park every cached widget still inside `scope`, so removing `scope` does not
   // take the widgets with it.
   function releaseNativeStreetViews(scope) {
@@ -2040,30 +1969,10 @@
       else hidePeek();
     };
     state.visualBoardShiftUpdate = updatePeekForShift;
-    // The round and the guess-side tile are the pair a player flips between, so
-    // they are built as soon as the board has painted rather than on arrival.
-    window.clearTimeout(state.boardPrewarmTimer);
-    state.boardPrewarmTimer = window.setTimeout(() => {
-      if (!state.visualBoardOpen) return;
-      for (const tile of [...element.querySelectorAll("[data-board-inspect]")].slice(0, 2)) {
-        warmNativeStreetView(tile.dataset.boardPano, Number(tile.dataset.boardHeading));
-      }
-    }, 400);
     for (const tile of element.querySelectorAll("[data-board-inspect]")) {
       tile.addEventListener("pointerenter", (event) => {
         hoveredTile = tile;
         if (state.shiftHeld || event.shiftKey) showPeek(tile);
-        // Otherwise get the widget ready, so pressing shift is instant. A short
-        // delay keeps a pointer sweeping across the board from building one for
-        // every tile it passes over.
-        else {
-          window.clearTimeout(state.boardWarmTimer);
-          state.boardWarmTimer = window.setTimeout(() => {
-            if (hoveredTile === tile) {
-              warmNativeStreetView(tile.dataset.boardPano, Number(tile.dataset.boardHeading));
-            }
-          }, 180);
-        }
       });
       tile.addEventListener("pointermove", (event) => {
         if (state.shiftHeld || event.shiftKey) {
@@ -3629,10 +3538,6 @@
         state.guessNeighborhood = comparison;
         render();
         showMetaOnMap(false);
-        // The guess-side anchor is only known once the player has guessed, so
-        // it misses the warm that ran when the round resolved.
-        const anchor = comparison.guessAnchor;
-        if (anchor?.panoId) warmNativeStreetView(anchor.panoId, Number(anchor.heading) || 0);
       } catch (error) {
         console.error("Meta Trainer: could not load guess-side cloud", error);
       }
@@ -3956,17 +3861,7 @@
       // images while the player is still reading the ordinary round result.
       // Pressing V later therefore reveals prepared content instead of
       // initiating work on the interaction path.
-      if (review.universal) {
-        // The corpus board needs no fetch - it is built from the round's own
-        // matches - so it can be assembled and its panoramas warmed right away.
-        // Most of these are already built from the round-start pass; this
-        // catches whatever it did not reach and adds the guess tile once the
-        // guess exists. Already-warmed panoramas are skipped, not rebuilt.
-        warmBoardPanoramas(
-          cradioClient.buildVisualBoard(review, state.guessNeighborhood),
-          token,
-        );
-      } else {
+      if (!review.universal) {
         preloadVisualBoard(review.datasetKey, review.location.mapIndex, token).catch((error) => {
           console.warn("Meta Trainer: visual-board preload failed", error);
         });
