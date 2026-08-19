@@ -23,17 +23,22 @@
   const ID_BYTES = 22;
   const COORD_SCALE = 1e6;
   const MAX_CACHED_CHUNKS = 64;
-  // How many neighbours to draw. The count is per location: keep everything
-  // within SIMILARITY_MARGIN of THAT location's own best match, so a place with
-  // a few near-twins shows a few dots and a generic roadside shows dozens.
+  // EVERY neighbour is drawn. The corpus exists so the cloud reads as a
+  // continuous shape rather than a handful of discrete pins, and truncating it
+  // to a few dozen puts the discreteness back. Marker size already encodes
+  // similarity, so the weak tail shows as small and the strong core as large -
+  // the shape carries the information that a cutoff would throw away.
   //
-  // Measured on 3,000 random rows of this corpus, which is why the rule is
-  // relative rather than absolute: rank-1 similarity itself spans 0.911 to
-  // 0.965 across locations, so a fixed cutoff at 0.95 leaves 68% of locations
-  // with nothing at all, while 0.88 gives almost everywhere the full 300.
-  // At margin 0.025, with the floor and the 300 cap applied, the count runs
-  // 10 / 31 / 110 at the 10th / 50th / 90th percentile: 19.5% of locations sit
-  // at the floor and 0.4% at the cap.
+  // The margin below no longer decides what is displayed. It decides how many
+  // matches steer the SUGGESTED CLICK, which is a different question: a click
+  // averaged over all 300 gets dragged toward wherever the weak tail happens to
+  // sit. Keep everything within SIMILARITY_MARGIN of THAT location's own best
+  // match, which on 3,000 sampled rows selects 10 / 31 / 110 matches at the
+  // 10th / 50th / 90th percentile.
+  //
+  // The margin is relative rather than absolute because rank-1 similarity spans
+  // 0.911 to 0.965 across locations: a fixed 0.95 cutoff selects nothing at all
+  // for 68% of them.
   const SIMILARITY_MARGIN = 0.025;
   const MIN_MATCHES = 10;
 
@@ -283,7 +288,8 @@
         longitude: dir.coords[target * 2 + 1] / COORD_SCALE,
       });
     }
-    const edge = adaptiveCount(matches.map((match) => match.similarity));
+    const similarities = matches.map((match) => match.similarity);
+    const steering = adaptiveCount(similarities);
     return {
       status: "complete",
       panoId: String(panoId),
@@ -292,8 +298,17 @@
       corpus: info.corpus,
       corpusSize: info.rows,
       neighborsPerPanorama: k,
-      boundary: edge,
-      recommendedClick: sphericalClick(matches, edge.count),
+      // count = every match: the client slices to this, so the whole cloud draws
+      boundary: {
+        detected: true,
+        count: matches.length,
+        score: similarities[0] - similarities[similarities.length - 1],
+        rule: "full cloud",
+      },
+      // ...while the click is steered by the strong core only
+      clickCount: steering.count,
+      clickRule: steering.rule,
+      recommendedClick: sphericalClick(matches, steering.count),
       matches,
       timings: { totalSeconds: (Date.now() - started) / 1000 },
     };
