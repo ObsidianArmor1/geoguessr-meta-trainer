@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.11
+// @version      2.2.0-beta.12
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -562,6 +562,38 @@
       yaw: String(((Number(heading) || 0) % 360 + 360) % 360),
     });
     return `https://streetviewpixels-pa.googleapis.com/v1/thumbnail?${query}`;
+  }
+
+  // Refit a Street View thumbnail to the box it will be drawn in.
+  //
+  // The tiles are a 3x3 grid sized by the window, so their aspect follows the
+  // viewport, while the thumbnails are a fixed 448x256 - the geometry the
+  // corpus was EMBEDDED at. `object-fit: contain` then letterboxes the
+  // difference. `thumbfov` is the HORIZONTAL field of view, so asking for a
+  // taller frame returns more sky and road from Google rather than stretching
+  // what is already there: the black bars fill with real imagery.
+  //
+  // Only the display changes. Similarity was computed on the 448x256 framing
+  // and is untouched by this.
+  function fitViewToBox(url, boxWidth, boxHeight) {
+    if (!/^https:\/\/streetviewpixels-pa\.googleapis\.com\//.test(url)) return url;
+    if (!(boxWidth > 0) || !(boxHeight > 0)) return url;
+    const ratio = Math.min(2, window.devicePixelRatio || 1);
+    // Measured: this endpoint caps the returned image at ~497x280 whatever is
+    // asked for - 640x360, 1024x576 and 2048x1152 all came back 497x280. The
+    // ASPECT is honoured though, which is the part that matters here, so ask
+    // for the shape of the box and let Google decide the pixels. Requesting
+    // more than ~640 is pointless.
+    const width = Math.max(224, Math.min(640, Math.round(boxWidth * ratio)));
+    const height = Math.max(128, Math.min(640, Math.round(boxHeight * ratio)));
+    try {
+      const next = new URL(url);
+      next.searchParams.set("w", String(width));
+      next.searchParams.set("h", String(height));
+      return next.toString();
+    } catch (_error) {
+      return url;
+    }
   }
 
   function viewSuffix(point) {
@@ -2096,7 +2128,8 @@
       const contentSlot = Number(image.dataset.boardSlot);
       image.removeAttribute("data-src");
       try {
-        image.src = await imageUrl(path);
+        const box = image.getBoundingClientRect();
+        image.src = fitViewToBox(await imageUrl(path), box.width, box.height);
         if (typeof image.decode === "function") await image.decode();
         if (contentMode && Number.isInteger(contentSlot)) {
           markBoardContentStatus(
