@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.18
+// @version      2.2.0-beta.19
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -1837,7 +1837,9 @@
           ? `#${item.globalPanoRank} most similar to this round`
           : Number.isFinite(item.reciprocalRank)
             ? `this round is #${item.reciprocalRank} most similar to it`
-            : "not within either panorama's 300 closest";
+            : item.estimated
+              ? "estimated · outside both 300-closest lists"
+              : "not within either panorama's 300 closest";
         const label = `Best visual case near your guess · heading ${item.heading}°`;
         // A similarity of 0.000 was being printed for an anchor whose likeness
         // to the round had never been measured, which reads as "nothing alike"

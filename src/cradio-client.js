@@ -459,8 +459,19 @@
           const found = raw.matches.find((match) => match.panoId === roundPanoId);
           if (found) reciprocal = found;
         }
-        const similarityToRound = anchorRank ? anchor.similarity
+        // Neither in the other's 300: fall back to the projected estimate,
+        // which covers any pair in the corpus. Flagged as an estimate so the
+        // display can say so - its mean error is 0.0145.
+        let estimated = false;
+        let similarityToRound = anchorRank ? anchor.similarity
           : reciprocal ? reciprocal.similarity : null;
+        if (similarityToRound === null && roundPanoId && pack.similarityBetween) {
+          const guess = await pack.similarityBetween(roundPanoId, anchor.panoId);
+          if (Number.isFinite(guess)) {
+            similarityToRound = guess;
+            estimated = true;
+          }
+        }
         const adapted = adaptResponse(raw, { ...context, panoId: raw.panoId });
         return {
           ...adapted,
@@ -481,6 +492,7 @@
             // the other's top 300, so all that is known is that it is weaker
             // than the weakest of those.
             unmeasured: similarityToRound === null,
+            estimated,
             selectedBy: anchorRank ? "strongest round match within radius" : "nearest corpus panorama",
             radiusKm: withinKm,
           },
@@ -551,6 +563,7 @@
           ? null : Number(anchor.similarityToRound),
         reciprocalRank: anchor.reciprocalRank ?? null,
         unmeasured: anchor.unmeasured === true,
+        estimated: anchor.estimated === true,
         candidatePool: Number(anchor.candidatePool) || matches.length,
       } : null;
       // how many separate places the tiles point at, at a 25 km grain

@@ -20,6 +20,8 @@
     "https://raw.githubusercontent.com/ObsidianArmor1/lodestar-neighbors/main/headings.bin.gz";
   const MANIFEST_URL =
     "https://raw.githubusercontent.com/ObsidianArmor1/lodestar-neighbors/main/manifest.json";
+  const PROJECTION_BASE =
+    "https://cdn.jsdelivr.net/gh/ObsidianArmor1/lodestar-neighbors@main/projection/";
   const DB_NAME = "lodestar-pack-v1";
   const STORE = "blobs";
   const ID_BYTES = 22;
@@ -48,6 +50,7 @@
   let headingsPromise = null;
   let manifestPromise = null;
   const chunkCache = new Map();          // chunk index -> decoded arrays
+  const projectionCache = new Map();     // chunk index -> decoded codes + scales
 
   function request(url, responseType) {
     if (typeof GM_xmlhttpRequest === "function") {
@@ -337,6 +340,68 @@
     return 2 * 6371.0088 * Math.asin(Math.min(1, Math.sqrt(h)));
   }
 
+  // The projected vector for one row, decoded from its chunk.
+  //
+  // The neighbour table is exact but covers only each panorama's 300 closest,
+  // so two panoramas that are not in each other's lists have no stored
+  // similarity at all. These codes give one for any pair: 256 int8 values and a
+  // scale per panorama, from a basis fitted to the corpus. Measured mean error
+  // 0.0145 against the true cosine, so it is an estimate and should be
+  // presented as one.
+  async function projectedVector(row) {
+    const info = await manifest();
+    const projection = info.projection;
+    if (!projection) return null;
+    const index = Math.floor(row / projection.chunkRows);
+    let decoded = projectionCache.get(index);
+    if (!decoded) {
+      const record = projection.chunks[index];
+      if (!record) return null;
+      const packed = await cached(`projection:${record.file}`,
+        () => request(PROJECTION_BASE + record.file, "arraybuffer"));
+      const plain = await gunzip(packed);
+      const dims = projection.dimensions;
+      const count = record.rows;
+      decoded = {
+        start: record.start,
+        dims,
+        codes: new Int8Array(plain, 0, count * dims),
+        // the scales follow the codes; count * dims is a multiple of 2, so this
+        // offset is safe for a 16-bit view
+        scales: new Uint16Array(plain.slice(count * dims)),
+      };
+      projectionCache.set(index, decoded);
+      while (projectionCache.size > 12) {
+        projectionCache.delete(projectionCache.keys().next().value);
+      }
+    }
+    const offset = (row - decoded.start) * decoded.dims;
+    const scale = half(decoded.scales[row - decoded.start]);
+    const vector = new Float32Array(decoded.dims);
+    let norm = 0;
+    for (let i = 0; i < decoded.dims; i += 1) {
+      const value = decoded.codes[offset + i] * scale;
+      vector[i] = value;
+      norm += value * value;
+    }
+    norm = Math.sqrt(norm) || 1;
+    for (let i = 0; i < decoded.dims; i += 1) vector[i] /= norm;
+    return vector;
+  }
+
+  // Estimated cosine similarity between any two panoramas in the corpus.
+  async function similarityBetween(panoIdA, panoIdB) {
+    const dir = await directory();
+    const rowA = dir.rowOf.get(String(panoIdA));
+    const rowB = dir.rowOf.get(String(panoIdB));
+    if (rowA === undefined || rowB === undefined) return null;
+    const [a, b] = await Promise.all([projectedVector(rowA), projectedVector(rowB)]);
+    if (!a || !b) return null;
+    let total = 0;
+    for (let i = 0; i < a.length; i += 1) total += a[i] * b[i];
+    return total;
+  }
+
   async function query(panoId, count) {
     const dir = await directory();
     const row = dir.rowOf.get(String(panoId));
@@ -399,5 +464,6 @@
   root.LodestarPack = {
     query, queryRow, nearest, directory, headings, headingOf, boundary,
     adaptiveCount, sphericalClick, half, haversineKm,
+    projectedVector, similarityBetween,
   };
 })(typeof window !== "undefined" ? window : globalThis);
