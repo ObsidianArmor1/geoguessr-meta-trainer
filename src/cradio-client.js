@@ -508,6 +508,10 @@
         reciprocal: false,
       });
       const anchor = guessCloud?.guessAnchor || null;
+      // The board holds `tiles` panoramas beside the round, and the guess tile
+      // takes one of those places rather than adding a tenth. It also removes
+      // itself from the match list: the anchor is usually one of the round's
+      // own matches, and showing it twice wastes a tile.
       const guessMatch = anchor ? {
         kind: "guess-local",
         mapIndex: -2,
@@ -521,7 +525,7 @@
       } : null;
       // how many separate places the tiles point at, at a 25 km grain
       const areas = [];
-      for (const match of matches.slice(0, tiles)) {
+      for (const match of matches.slice(0, guessMatch ? tiles - 1 : tiles)) {
         if (!areas.some((seat) => haversineKm(seat[0], seat[1], match.latitude, match.longitude) < 25)) {
           areas.push([match.latitude, match.longitude]);
         }
@@ -539,7 +543,9 @@
           currentHeading: Math.round(roundHeading),
           currentView: thumbnail(review.location?.panoId || "", roundHeading),
           similarityLabel: "panorama similarity",
-          entries: matches.slice(0, tiles).map(entry),
+          entries: (guessMatch
+          ? matches.filter((match) => match.panoId !== guessMatch.panoId).slice(0, tiles - 1)
+          : matches.slice(0, tiles)).map(entry),
           guessMatch,
           support: review.visualNeighborhood?.coreCount || matches.length,
           supportOf: matches.length,
