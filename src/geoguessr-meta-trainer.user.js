@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.26
+// @version      2.2.0-beta.27
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -207,6 +207,8 @@
     matchTooltipNative: [],
     boardWarmTimer: 0,
     boardPrewarmTimer: 0,
+    guessPrefetchKey: "",
+    guessPrefetchTimer: 0,
     matchTooltipTimer: 0,
     matchTooltipToken: 0,
     hoveredMatchKey: null,
@@ -3371,6 +3373,31 @@
     }
   }
 
+  // Warm what the guess-side cloud will need, from a pin that may still move.
+  //
+  // Only the fetches are done here, never the drawing: the guess is not final
+  // until the round ends, and a moved pin simply warms a different chunk. The
+  // work is idempotent and cached, so repeated clicks cost nothing after the
+  // first in a neighbourhood.
+  async function prefetchGuessSide(latitude, longitude) {
+    const pack = pageWindow.LodestarPack || window.LodestarPack;
+    if (!pack?.nearest) return;
+    const key = `${latitude.toFixed(3)},${longitude.toFixed(3)}`;
+    if (state.guessPrefetchKey === key) return;
+    state.guessPrefetchKey = key;
+    window.clearTimeout(state.guessPrefetchTimer);
+    state.guessPrefetchTimer = window.setTimeout(async () => {
+      try {
+        const anchor = await pack.nearest(latitude, longitude, { withinKm: 100 });
+        if (!anchor) return;
+        // pulls the anchor's chunk into the cache, which is the slow part
+        await pack.queryRow(anchor.row, 300);
+      } catch (_error) {
+        // a warm that fails costs nothing; the real load will try again
+      }
+    }, 250);
+  }
+
   function setupMapCapture() {
     const timer = setInterval(() => {
       const MVCObject = pageWindow.google?.maps?.MVCObject;
@@ -3386,6 +3413,20 @@
           state.maps.add(this);
           this.addListener?.("idle", () => {
             if (state.drawerOpen && state.overlays.length === 0) showMetaOnMap(false);
+          });
+          // Where the player clicks on the guess map, while they are still
+          // guessing. The round-end event is the first place the guess is
+          // formally known, and everything the blue cloud needs - which corpus
+          // panorama is nearest, and that panorama's chunk - starts only then,
+          // so the dots arrive well after the result screen. Clicking the map
+          // is the earliest honest signal, and it costs a fetch that would have
+          // happened anyway.
+          this.addListener?.("click", (event) => {
+            const latitude = event?.latLng?.lat?.();
+            const longitude = event?.latLng?.lng?.();
+            if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+              prefetchGuessSide(latitude, longitude);
+            }
           });
         }
         return result;
