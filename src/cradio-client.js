@@ -1,12 +1,15 @@
 (function (root) {
   "use strict";
 
-  // Lodestar 100k (waves 0001-0002). The 49,417-panorama Balanced World pilot
-  // stays deployed at ...-pilot-v1-... as the baseline to compare against.
+  // Lodestar 1M: 999,693 panoramas, the full frozen corpus. The 49,417-panorama
+  // Balanced World pilot stays deployed at ...-pilot-v1-... as the baseline to
+  // compare against.
   const ENDPOINT = "https://obsidianarmor1--geoguessr-cradio-lodestar-v1-pilot-query.modal.run";
   const TOKEN_KEY = "omt-cradio-proxy-token-v1";
   const CACHE_KEY = "omt-cradio-cache-v1";
-  const CACHE_VERSION = 1;
+  // Bumped with the corpus behind the endpoint: cached entries hold
+  // neighbours from the 100k corpus, and nothing in an entry says so.
+  const CACHE_VERSION = 2;
   const MAX_CACHE_ENTRIES = 24;
   // Measured against the Lodestar service: 0.3-0.5s warm, 10.7s cold, and ~45s
   // for the first query after a deployment while the GPU memory snapshot is
@@ -340,7 +343,9 @@
     async prefetch(panoId, context = {}) {
       const id = String(panoId || "");
       if (!id) return { ok: false, reason: "missing-pano" };
-      if (!this.configured()) return { ok: false, reason: "missing-credential" };
+      // The credential check moved into resolve(). The static pack needs no
+      // token: a panorama already in the corpus is answered from precomputed
+      // neighbours, so playing a Lodestar map requires no account at all.
       if (this.results.has(id)) return this.results.get(id);
       const cache = this.readCache();
       const cached = cache.entries[id];
@@ -355,7 +360,7 @@
         }
       }
       if (this.inflight.has(id)) return this.inflight.get(id);
-      const pending = this.fetch(id, context).then((result) => {
+      const pending = this.resolve(id, context).then((result) => {
         this.results.set(id, result);
         if (this.results.size > 128) this.results.delete(this.results.keys().next().value);
         return result;
@@ -364,6 +369,36 @@
       });
       this.inflight.set(id, pending);
       return pending;
+    }
+
+    // Static pack first, Modal second. Every panorama in a map cut from
+    // Lodestar has precomputed global neighbours, so the GPU is only needed for
+    // a panorama outside the corpus - which cannot happen on those maps.
+    async resolve(panoId, context) {
+      const local = await this.fromPack(panoId, context);
+      if (local) return local;
+      if (!this.configured()) return { ok: false, reason: "missing-credential" };
+      return this.fetch(panoId, context);
+    }
+
+    async fromPack(panoId, context) {
+      const pack = root.LodestarPack;
+      if (!pack || this.packDisabled) return null;
+      try {
+        const raw = await pack.query(panoId, 300);
+        if (!raw) return null;               // outside the corpus: let Modal try
+        return {
+          ok: true,
+          cached: false,
+          source: "lodestar-static-pack",
+          response: adaptResponse(raw, { ...context, panoId: String(panoId) }),
+        };
+      } catch (error) {
+        // A pack failure must never end a round: fall through to Modal and say
+        // why in the console rather than surfacing "similarity unavailable".
+        console.warn("[cradio] static pack unavailable, using Modal:", error && error.message);
+        return null;
+      }
     }
 
     async fetch(panoId, context) {

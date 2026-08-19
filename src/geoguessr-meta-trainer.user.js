@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.1.0-beta.12
-// @description  Browser-local post-round visual similarity learning for any Street View map.
+// @version      2.2.0-beta.1
+// @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
@@ -11,6 +11,7 @@
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/f1006b4177886b80a3921ccc27030dd9f3a9721b/src/universal-similarity.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
