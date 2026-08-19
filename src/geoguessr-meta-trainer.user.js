@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.16
+// @version      2.2.0-beta.17
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -1687,6 +1687,75 @@
     state.shadow?.querySelector(".omt-visual-board,.omt-board-loading")?.remove();
   }
 
+  // Live Street View widgets, kept between hovers.
+  //
+  // Every peek used to construct a StreetViewPanorama and dispose the previous
+  // one, so going back to a tile already viewed rebuilt the widget and reloaded
+  // its tiles - about half a second of blur each time, even for a panorama seen
+  // seconds earlier. Widgets are now moved rather than destroyed: off-screen
+  // when not shown, back into place when hovered again, still rendered.
+  //
+  // They are parked off-screen rather than hidden, because a display:none
+  // panorama stops rendering and has to repaint on return - which is the thing
+  // being avoided.
+  const NATIVE_PANO_CACHE_LIMIT = 8;
+  const nativePanoCache = new Map();
+  let nativePanoAttic = null;
+
+  function nativePanoKey(panoId, heading) {
+    return `${panoId}@${Math.round(Number(heading) || 0)}`;
+  }
+
+  function nativePanoAtticElement() {
+    if (!nativePanoAttic || !nativePanoAttic.isConnected) {
+      nativePanoAttic = document.createElement("div");
+      nativePanoAttic.setAttribute("aria-hidden", "true");
+      nativePanoAttic.style.cssText =
+        "position:fixed;left:-10000px;top:0;width:720px;height:420px;pointer-events:none;";
+      document.body.appendChild(nativePanoAttic);
+    }
+    return nativePanoAttic;
+  }
+
+  function trimNativePanoCache() {
+    if (nativePanoCache.size <= NATIVE_PANO_CACHE_LIMIT) return;
+    const entries = [...nativePanoCache.entries()].sort((a, b) => a[1].usedAt - b[1].usedAt);
+    for (const [key, entry] of entries.slice(0, nativePanoCache.size - NATIVE_PANO_CACHE_LIMIT)) {
+      disposeNativePanoramas([entry.panorama]);
+      entry.host.remove();
+      nativePanoCache.delete(key);
+    }
+  }
+
+  // Mounts a panorama in place of `slot`, reusing a live one when possible.
+  function mountNativeStreetView(slot, panoId, heading) {
+    if (!slot || !panoId) return null;
+    const key = nativePanoKey(panoId, heading);
+    const cached = nativePanoCache.get(key);
+    if (cached && cached.host) {
+      cached.usedAt = Date.now();
+      slot.replaceWith(cached.host);
+      // the widget was last laid out at the attic's size, so tell it to re-fit
+      pageWindow.google?.maps?.event?.trigger?.(cached.panorama, "resize");
+      return cached.panorama;
+    }
+    const panorama = nativeStreetView(slot, panoId, heading);
+    if (panorama) {
+      nativePanoCache.set(key, { host: slot, panorama, usedAt: Date.now() });
+      trimNativePanoCache();
+    }
+    return panorama;
+  }
+
+  // Park every cached widget still inside `scope`, so removing `scope` does not
+  // take the widgets with it.
+  function releaseNativeStreetViews(scope) {
+    if (!scope) return;
+    for (const entry of nativePanoCache.values()) {
+      if (entry.host && scope.contains?.(entry.host)) nativePanoAtticElement().appendChild(entry.host);
+    }
+  }
+
   function disposeNativePanoramas(panoramas) {
     const maps = pageWindow.google?.maps;
     for (const panorama of panoramas || []) {
@@ -1815,10 +1884,11 @@
         });
       });
     }
-    let peekPanoramas = [];
     const hidePeek = () => {
-      disposeNativePanoramas(peekPanoramas);
-      element.querySelector(".omt-board-peek")?.remove();
+      const peek = element.querySelector(".omt-board-peek");
+      // move the live widget out before the peek is removed, or it goes with it
+      releaseNativeStreetViews(peek);
+      peek?.remove();
     };
     const showPeek = (tile) => {
       hidePeek();
@@ -1836,12 +1906,11 @@
           if (peek.isConnected) image.src = url;
         }).catch(() => hidePeek());
       }
-      const panorama = nativeStreetView(
+      mountNativeStreetView(
         peek.querySelector(".omt-native-pano"),
         tile.dataset.boardPano,
         Number(tile.dataset.boardHeading),
       );
-      if (panorama) peekPanoramas.push(panorama);
     };
     let hoveredTile = null;
     const updatePeekForShift = (held) => {
@@ -2008,7 +2077,8 @@
     state.matchTooltipTimer = 0;
     state.matchTooltipToken += 1;
     state.hoveredMatchKey = null;
-    disposeNativePanoramas(state.matchTooltipNative);
+    releaseNativeStreetViews(state.matchTooltip);
+    state.matchTooltipNative.length = 0;
     state.matchTooltip?.remove();
     state.matchTooltip = null;
     state.matchTooltipPoint = null;
@@ -2041,7 +2111,7 @@
         cell.className = "omt-native-pano";
         cell.setAttribute("aria-label", `High-resolution Street View heading ${heading}°`);
         grid.appendChild(cell);
-        const panorama = nativeStreetView(cell, row.p, heading);
+        const panorama = mountNativeStreetView(cell, row.p, heading);
         if (panorama) state.matchTooltipNative.push(panorama);
       }
       host.appendChild(grid);
