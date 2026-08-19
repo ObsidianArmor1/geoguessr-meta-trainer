@@ -398,18 +398,46 @@
     // coordinate, so the original behaviour is available again: find the
     // panorama nearest the player's guess and draw ITS neighbourhood beside
     // the round's.
-    async guessNeighborhood(guess, context = {}) {
+    async guessNeighborhood(guess, context = {}, roundMatches = []) {
       const pack = root.LodestarPack;
       if (!pack || !guess) return null;
       const latitude = Number(guess.lat ?? guess.latitude);
       const longitude = Number(guess.lng ?? guess.longitude);
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
       try {
+        // Anchor selection, in the order that answers the actual question:
+        // "the most similar panorama to this round, near where I guessed".
+        //
+        // 1. The strongest of the ROUND's own matches inside the radius. This
+        //    is exact - the similarity comes from the neighbour table, not an
+        //    approximation - and it is the panorama that makes the visual case
+        //    for the guess. The old implementation instead took the 160 nearest
+        //    panoramas and scored them per view slot, which needs per-view
+        //    vectors; those were never written for this corpus (shards carry
+        //    only the fused vector), so that route is closed until a
+        //    re-extraction retains them.
+        // 2. Failing that, the nearest corpus panorama, so the guess side still
+        //    shows the local visual character even when nothing similar to the
+        //    round is anywhere near.
+        const withinKm = Number(context.guessRadiusKm) || 50;
+        let anchor = null;
+        let anchorRank = null;
+        for (const match of roundMatches) {
+          const km = pack.haversineKm(latitude, longitude, match.latitude, match.longitude);
+          if (km <= withinKm) { anchor = { ...match, distanceKm: km }; anchorRank = match.rank; break; }
+        }
+        if (anchor) {
+          const dir = await pack.directory();
+          anchor.row = dir.rowOf.get(String(anchor.panoId));
+        }
         // A guess in the ocean would otherwise anchor to whatever continent is
         // least far away - measured at 1,117 km for a mid-Pacific guess. The
         // original could not do this because it searched only the map's own
         // panoramas; a corpus-wide search needs the cap put back explicitly.
-        const anchor = await pack.nearest(latitude, longitude, { withinKm: 100 });
+        if (!anchor || anchor.row === undefined) {
+          anchor = await pack.nearest(latitude, longitude, { withinKm: 100 });
+          anchorRank = null;
+        }
         if (!anchor) return null;
         const raw = await pack.queryRow(anchor.row, 300);
         if (!raw) return null;
@@ -421,6 +449,12 @@
             latitude: anchor.latitude,
             longitude: anchor.longitude,
             distanceFromGuessKm: anchor.distanceKm,
+            // rank in the ROUND's matches, or null when nothing similar to the
+            // round was within the radius and this is merely the nearest
+            roundRank: anchorRank,
+            similarityToRound: anchorRank ? anchor.similarity : null,
+            selectedBy: anchorRank ? "strongest round match within radius" : "nearest corpus panorama",
+            radiusKm: withinKm,
           },
         };
       } catch (error) {
