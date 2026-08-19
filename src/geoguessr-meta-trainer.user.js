@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.15
+// @version      2.2.0-beta.16
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -107,7 +107,13 @@
     // filled levels per cloud plus 300 dots, which reads as overwhelming on a
     // detailed basemap; 40% keeps the shape legible and lets the map through.
     bandIntensity: 0.4,
+    // How many of the ranked matches are drawn. The static pack stores 300 per
+    // panorama, which is the ceiling without rebuilding it - so this is a slice
+    // of a row already in hand, and changing it costs no fetch and no refetch.
+    matchCount: 300,
   };
+  const MATCH_COUNT_MIN = 10;
+  const MATCH_COUNT_MAX = 300;
   const LEGACY_GUESS_DOT_COLOR = "#9b6cff";
   const liveChallengeAdapter = globalThis.OMTLiveChallenge;
   if (!liveChallengeAdapter) throw new Error("Live Challenge adapter did not load");
@@ -149,6 +155,13 @@
 
   if (typeof GM_registerMenuCommand === "function") {
     GM_registerMenuCommand("Configure C-RADIO cloud", configureCloudRadio);
+    GM_registerMenuCommand("Set matches shown per round", () => {
+      const answer = window.prompt(
+        `How many of the ranked matches to draw (${MATCH_COUNT_MIN}-${MATCH_COUNT_MAX})?`,
+        String(state.matchCount),
+      );
+      if (answer !== null) setMatchCount(answer);
+    });
   }
   const { LIVE_CHALLENGE_PATH, PARTY_LOBBY_PATH } = liveChallengeAdapter;
   const prewarmedRoundKeys = new Set();
@@ -186,6 +199,7 @@
     // dots is a lot of ink at full strength, and how much is too much depends
     // on the map underneath and the player.
     bandIntensity: mapColorPreferences.bandIntensity,
+    matchCount: mapColorPreferences.matchCount,
     neighborClickColor: mapColorPreferences.neighborClick,
     guessDotColor: mapColorPreferences.guessDots,
     matchTooltip: null,
@@ -274,14 +288,32 @@
           ? DEFAULT_MAP_COLORS.guessDots
           : storedGuessDots,
         bandIntensity: normalizeIntensity(stored?.bandIntensity, DEFAULT_MAP_COLORS.bandIntensity),
+        matchCount: normalizeMatchCount(stored?.matchCount, DEFAULT_MAP_COLORS.matchCount),
       };
     } catch (_error) {
       return { ...DEFAULT_MAP_COLORS };
     }
   }
 
-  function normalizeIntensity(value, fallback) {
+  // `Number(null)` and `Number("")` are 0, which is finite - so an absent or
+  // blank stored value would read as a real zero and clamp to the minimum
+  // rather than falling back. For the band intensity that meant a stored null
+  // silently turning the clouds off.
+  function numberOr(value, fallback) {
+    if (value === null || value === undefined || value === "") return fallback;
     const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  function normalizeMatchCount(value, fallback) {
+    const number = numberOr(value, NaN);
+    return Number.isFinite(number)
+      ? Math.max(MATCH_COUNT_MIN, Math.min(MATCH_COUNT_MAX, Math.round(number)))
+      : fallback;
+  }
+
+  function normalizeIntensity(value, fallback) {
+    const number = numberOr(value, NaN);
     return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : fallback;
   }
 
@@ -291,6 +323,7 @@
       neighborClick: state.neighborClickColor,
       guessDots: state.guessDotColor,
       bandIntensity: state.bandIntensity,
+      matchCount: state.matchCount,
     }));
   }
 
@@ -1152,7 +1185,7 @@
           <div class="omt-toolbar"><button class="omt-compare-button" id="omt-compare">Compare views <kbd>V</kbd></button><button id="omt-mode-cycle">${mapModeLabel()} <kbd>M</kbd></button><button class="omt-fit" id="omt-fit">Fit map</button></div>
           <div class="omt-scroll">
             ${neighborhoodHtml}
-            <section class="omt-section"><div class="omt-section-head"><h3>Map overlays</h3><span>saved between rounds</span></div><div class="omt-map-actions"><label class="omt-layer-toggle"><input type="checkbox" id="omt-best-meta" ${state.showBestMeta ? "checked" : ""}>Families</label><label class="omt-layer-toggle"><input type="checkbox" id="omt-neighbors" ${state.showVisualNeighbors ? "checked" : ""}>Round matches</label><label class="omt-layer-toggle" title="Compare the visual neighborhood near your guess with the revealed location"><input type="checkbox" id="omt-guess-neighbors" ${state.showGuessNeighbors ? "checked" : ""} ${state.playerGuess ? "" : "disabled"}>Guess comparison</label><label class="omt-color-setting">Round <input type="color" id="omt-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Guess <input type="color" id="omt-guess-dot-color" value="${state.guessDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-click-color" value="${state.neighborClickColor}"></label><label class="omt-color-setting" title="How strongly the similarity-mass bands are painted. Zero shows dots only.">Cloud <input type="range" id="omt-band-intensity" min="0" max="100" step="5" value="${Math.round(state.bandIntensity * 100)}" style="width:74px"></label></div>${guessComparisonHtml}<div class="omt-click-lines">${clickLines || ""}</div></section>
+            <section class="omt-section"><div class="omt-section-head"><h3>Map overlays</h3><span>saved between rounds</span></div><div class="omt-map-actions"><label class="omt-layer-toggle"><input type="checkbox" id="omt-best-meta" ${state.showBestMeta ? "checked" : ""}>Families</label><label class="omt-layer-toggle"><input type="checkbox" id="omt-neighbors" ${state.showVisualNeighbors ? "checked" : ""}>Round matches</label><label class="omt-layer-toggle" title="Compare the visual neighborhood near your guess with the revealed location"><input type="checkbox" id="omt-guess-neighbors" ${state.showGuessNeighbors ? "checked" : ""} ${state.playerGuess ? "" : "disabled"}>Guess comparison</label><label class="omt-color-setting">Round <input type="color" id="omt-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Guess <input type="color" id="omt-guess-dot-color" value="${state.guessDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-click-color" value="${state.neighborClickColor}"></label><label class="omt-color-setting" title="How strongly the similarity-mass bands are painted. Zero shows dots only.">Cloud <input type="range" id="omt-band-intensity" min="0" max="100" step="5" value="${Math.round(state.bandIntensity * 100)}" style="width:74px"></label><label class="omt-color-setting" title="How many of the ranked matches to draw. The pack stores 300 per panorama.">Matches <input type="number" id="omt-match-count" min="${MATCH_COUNT_MIN}" max="${MATCH_COUNT_MAX}" step="10" value="${state.matchCount}" style="width:52px"></label></div>${guessComparisonHtml}<div class="omt-click-lines">${clickLines || ""}</div></section>
             <section class="omt-section"><div class="omt-section-head"><h3>Matched families</h3><span>${metas.length} shown${review.moreMetas?.length ? ` · ${review.moreMetas.length} more` : ""}</span></div><nav class="omt-nav"><button id="omt-prev" ${state.active === 0 ? "disabled" : ""}>←</button><select id="omt-select" aria-label="Active family">${optionHtml}</select><button id="omt-next" ${state.active === metas.length - 1 ? "disabled" : ""}>→</button></nav>${review.moreMetas?.length ? `<button class="omt-more" id="omt-more">Add next family (${review.moreMetas.length} remaining)</button>` : ""}<div class="omt-family-head"><div><h2>${esc(familyDisplayTitle(meta))}</h2><p>${agreement}</p></div><span class="omt-strength">${esc(strengthLabel)}</span></div><div class="omt-metrics"><div class="omt-metric"><b>${(meta.bits || 0).toFixed(2)}</b><span>location bits</span></div><div class="omt-metric"><b>${meta.members.toLocaleString()}</b><span>family locations</span></div><div class="omt-metric"><b>${Number.isFinite(meta.repeatability) ? `${Math.round(meta.repeatability * 100)}%` : "—"}</b><span>replicated</span></div></div>${usefulFamilyDescription(meta) ? `<p class="omt-description">${esc(usefulFamilyDescription(meta))}</p>` : ""}${filtered ? `<details class="omt-system-details"><summary>Filtering details</summary>${esc(filtered)}</details>` : ""}</section>
             <section class="omt-section"><div class="omt-section-head"><h3>This round</h3><span>${viewEvidence ? "family evidence by direction" : "four stored directions"}</span></div><div class="omt-views">${viewHtml}</div></section>
             <section class="omt-section"><div class="omt-section-head"><h3>Family examples</h3><span>this round + eight representative views</span></div><button class="omt-evidence" data-image="${esc(representativeViews)}" data-label="${esc(familyDisplayTitle(meta))} · representative views"><img data-src="${esc(representativeViews)}" alt="Representative views for ${esc(familyDisplayTitle(meta))}"></button><p class="omt-note">${esc(evidenceNote)}</p></section>
@@ -1204,6 +1237,9 @@
     state.shadow.getElementById("omt-click-color")?.addEventListener("input", (event) => {
       setMapColor("click", event.target.value);
     });
+    state.shadow.getElementById("omt-match-count")?.addEventListener("change", (event) => {
+      setMatchCount(event.target.value);
+    });
     state.shadow.getElementById("omt-band-intensity")?.addEventListener("input", (event) => {
       state.bandIntensity = normalizeIntensity(Number(event.target.value) / 100, 0.4);
       saveMapColorPreferences();
@@ -1250,6 +1286,15 @@
     } else {
       showMetaOnMap(false);
     }
+  }
+
+  function setMatchCount(value) {
+    const next = normalizeMatchCount(value, state.matchCount);
+    if (next === state.matchCount) return;
+    state.matchCount = next;
+    saveMapColorPreferences();
+    render();
+    showMetaOnMap(false);
   }
 
   function setMapLayer(layer, enabled) {
@@ -3066,15 +3111,24 @@
         bounds.extend({ lat, lng });
       }
     }
-    const visualMatches = context.visualNeighborhood?.visualMatches || [];
+    // The row holds 300; this draws the strongest `matchCount` of them. Slicing
+    // here rather than at fetch time means the setting applies instantly to a
+    // round already on screen, with nothing to re-request or re-cache.
+    const shown = state.matchCount;
+    const visualMatches = (context.visualNeighborhood?.visualMatches || []).slice(0, shown);
     const guessComparison = state.showVisualNeighbors && state.showGuessNeighbors
       ? state.guessNeighborhood
       : null;
-    const guessMatches = guessComparison?.visualNeighborhood?.visualMatches || [];
+    const guessMatches = (guessComparison?.visualNeighborhood?.visualMatches || [])
+      .slice(0, shown);
     if (state.showVisualNeighbors && visualMatches.length) {
       const combined = new Map();
-      const coreCount = Number(context.visualNeighborhood?.coreCount)
-        || Math.min(50, visualMatches.length);
+      // The core cannot exceed what is drawn: at a small count every dot shown
+      // is a close match, and marking none of them as core would be wrong.
+      const coreCount = Math.min(
+        Number(context.visualNeighborhood?.coreCount) || Math.min(50, visualMatches.length),
+        visualMatches.length,
+      );
       for (const match of visualMatches) {
         combined.set(match.mapIndex, {
           ...match,
