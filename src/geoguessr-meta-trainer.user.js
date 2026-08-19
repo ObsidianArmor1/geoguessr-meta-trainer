@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.8
+// @version      2.2.0-beta.9
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -1654,17 +1654,19 @@
           ? `global pano match #${item.globalPanoRank}`
           : "outside the adaptive visual set";
         const label = `Best visual case near your guess · heading ${item.heading}°`;
-        const detail = `${Number(item.viewSimilarity).toFixed(3)} view similarity · ${distance} from guess · ${rank}`;
+        const detail = `${Number(item.viewSimilarity).toFixed(3)} ${mode.similarityLabel || "view similarity"} · ${distance} from guess · ${rank}`;
         return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess · ${item.heading}°</span><em>${esc(detail)}</em></button>`;
       }
       const distance = item.distanceKm < 1
         ? `${Math.round(item.distanceKm * 1000)} m`
         : `${item.distanceKm.toFixed(1)} km`;
       const label = `Visual match #${item.rank} · heading ${item.heading}°${item.reciprocal ? " · mutual match" : ""}`;
-      const detail = `${Number(item.viewSimilarity).toFixed(3)} view similarity · ${distance}`;
+      const detail = `${Number(item.viewSimilarity).toFixed(3)} ${mode.similarityLabel || "view similarity"} · ${distance}`;
       return `<button class="omt-board-match" data-board-entry="${item.mapIndex}" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Visual match ${item.rank}"><span>#${item.rank} · ${item.heading}°${item.reciprocal ? " · mutual" : ""}</span><em>${esc(detail)}</em></button>`;
     }).join("");
-    const interpretation = literal
+    const interpretation = board.corpus
+      ? "Closest panoramas in the corpus, each shown along its own road direction."
+      : literal
       ? "Eight closest views, without filtering for agreement."
       : mode.id === "alternate"
         ? "Another shared look among the nearest visual candidates."
@@ -1674,7 +1676,9 @@
     const guessReceipt = mode.guessMatch
       ? `<span><b>best of ${mode.guessMatch.candidatePool}</b> locations near your guess</span>`
       : "";
-    element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid"><div class="omt-board-current" tabindex="0" data-board-pano="${esc(board.panoId)}" data-board-heading="${Number(mode.currentHeading) || 0}" data-board-inspect data-board-label="This round · heading ${mode.currentHeading}°" data-board-detail="Current panorama direction used for this comparison"><img data-src="${esc(mode.currentView)}" data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0" alt="Current round heading ${mode.currentHeading}"><strong>This round · ${mode.currentHeading}°</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}<span><b>${literal ? "nearest visual views" : `${mode.support}/100`}</b> in this group</span><span><b>${mode.reciprocalSupport}</b> mutual matches</span><span><b>${mode.independentAreas}</b> separate areas</span><span><b>${Math.round(mode.coherence * 100)}%</b> visual agreement</span><span class="omt-board-warning">Visual similarity is evidence, not certainty.</span></footer>`;
+    element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid"><div class="omt-board-current" tabindex="0" data-board-pano="${esc(board.panoId)}" data-board-heading="${Number(mode.currentHeading) || 0}" data-board-inspect data-board-label="This round · heading ${mode.currentHeading}°" data-board-detail="Current panorama direction used for this comparison"><img data-src="${esc(mode.currentView)}" data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0" alt="Current round heading ${mode.currentHeading}"><strong>This round · ${mode.currentHeading}°</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}${board.corpus
+        ? `<span><b>${mode.support}</b> of ${mode.supportOf} in the close core</span><span><b>${mode.independentAreas}</b> separate areas</span>`
+        : `<span><b>${literal ? "nearest visual views" : `${mode.support}/100`}</b> in this group</span><span><b>${mode.reciprocalSupport}</b> mutual matches</span><span><b>${mode.independentAreas}</b> separate areas</span><span><b>${Math.round(mode.coherence * 100)}%</b> visual agreement</span>`}<span class="omt-board-warning">Visual similarity is evidence, not certainty.</span></footer>`;
     state.shadow.appendChild(element);
     element.querySelector(".omt-board-close").addEventListener("click", closeVisualBoard);
     for (const button of element.querySelectorAll("[data-board-mode]")) {
@@ -1830,8 +1834,11 @@
   async function openVisualBoard() {
     if (!state.review || !state.shadow) return;
     state.visualBoardOpen = true;
-    if (state.visualBoard?.mapIndex === state.review.location.mapIndex
-        && state.visualBoard?.datasetKey === state.review.datasetKey) {
+    if (state.visualBoard?.panoId === state.review.location.panoId
+        && state.visualBoard?.corpus === Boolean(state.review.universal)
+        && (state.visualBoard?.corpus
+          || (state.visualBoard?.mapIndex === state.review.location.mapIndex
+            && state.visualBoard?.datasetKey === state.review.datasetKey))) {
       renderVisualBoard();
       return;
     }
@@ -1841,14 +1848,22 @@
     loading.textContent = "Finding coherent visual interpretations…";
     state.shadow.appendChild(loading);
     try {
-      const board = await preloadVisualBoard(
-        state.review.datasetKey,
-        state.review.location.mapIndex,
-      );
+      // The corpus path has no dataset and no map index, so /api/visual-board
+      // cannot serve it. Build the board from the round's own matches and the
+      // guess-side anchor instead.
+      const board = state.review.universal
+        ? cradioClient.buildVisualBoard(
+            state.review,
+            state.showGuessNeighbors ? state.guessNeighborhood : null,
+          )
+        : await preloadVisualBoard(
+            state.review.datasetKey,
+            state.review.location.mapIndex,
+          );
       if (!board) return;
-      if (!state.visualBoardOpen || !state.review
-          || board.mapIndex !== state.review.location.mapIndex
-          || board.datasetKey !== state.review.datasetKey) return;
+      if (!state.visualBoardOpen || !state.review) return;
+      if (!board.corpus && (board.mapIndex !== state.review.location.mapIndex
+          || board.datasetKey !== state.review.datasetKey)) return;
       state.visualBoard = board;
       state.visualBoardMode = board.defaultMode || "consensus";
       renderVisualBoard();
