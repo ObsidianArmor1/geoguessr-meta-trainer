@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.34
+// @version      2.2.0-beta.35
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -367,7 +367,17 @@
     // The legend follows the layers, each independently
     const guess = state.showGuessNeighbors ? state.guessNeighborhood : null;
     const overlap = guess?.overlap;
-    return `<div class="omt-legend">${state.showVisualNeighbors && neighborhood?.visualMatches?.length ? `<i class="omt-legend-match omt-legend-round-match"></i> closest matches <i class="omt-legend-match omt-legend-tail-match"></i> wider distribution <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click` : ""}${guess ? `<i class="omt-legend-match omt-legend-guess-match"></i> guess matches <i class="omt-legend-match omt-legend-shared-match"></i> shared${overlap ? ` (${overlap.sharedLocations})` : ""}` : ""}<i class="omt-legend-current"></i> round</div>`;
+    const round = state.showVisualNeighbors && neighborhood?.visualMatches?.length
+      ? `<i class="omt-legend-match omt-legend-round-match"></i> closest matches <i class="omt-legend-match omt-legend-tail-match"></i> wider distribution <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click`
+      : "";
+    const guessKeys = guess
+      ? `<i class="omt-legend-match omt-legend-guess-match"></i> guess matches <i class="omt-legend-match omt-legend-shared-match"></i> shared${overlap ? ` (${overlap.sharedLocations})` : ""}`
+      : "";
+    // No key for the round marker: that is GeoGuessr's own icon, which the
+    // player already knows. A legend earns its space by naming what this
+    // script added.
+    if (!round && !guessKeys) return "";
+    return `<div class="omt-legend">${round}${guessKeys}</div>`;
   }
 
   function request(path, options = {}) {
