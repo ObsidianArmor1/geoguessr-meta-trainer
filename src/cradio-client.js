@@ -119,6 +119,7 @@
         datasetKey,
         mapIndex: Number.isInteger(Number(item.mapIndex)) ? Number(item.mapIndex) : index,
         panoId: String(item.panoId || ""),
+        heading: Number.isFinite(Number(item.heading)) ? Number(item.heading) : null,
         rank: Number.isInteger(Number(item.rank)) ? Number(item.rank) : index + 1,
         latitude: point.latitude,
         longitude: point.longitude,
@@ -449,6 +450,7 @@
             latitude: anchor.latitude,
             longitude: anchor.longitude,
             distanceFromGuessKm: anchor.distanceKm,
+            heading: Number.isFinite(Number(anchor.heading)) ? Number(anchor.heading) : null,
             // rank in the ROUND's matches, or null when nothing similar to the
             // round was within the radius and this is merely the nearest
             roundRank: anchorRank,
