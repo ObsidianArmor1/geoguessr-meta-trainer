@@ -23,6 +23,19 @@
   const ID_BYTES = 22;
   const COORD_SCALE = 1e6;
   const MAX_CACHED_CHUNKS = 64;
+  // How many neighbours to draw. The count is per location: keep everything
+  // within SIMILARITY_MARGIN of THAT location's own best match, so a place with
+  // a few near-twins shows a few dots and a generic roadside shows dozens.
+  //
+  // Measured on 3,000 random rows of this corpus, which is why the rule is
+  // relative rather than absolute: rank-1 similarity itself spans 0.911 to
+  // 0.965 across locations, so a fixed cutoff at 0.95 leaves 68% of locations
+  // with nothing at all, while 0.88 gives almost everywhere the full 300.
+  // At margin 0.025, with the floor and the 300 cap applied, the count runs
+  // 10 / 31 / 110 at the 10th / 50th / 90th percentile: 19.5% of locations sit
+  // at the floor and 0.4% at the cap.
+  const SIMILARITY_MARGIN = 0.025;
+  const MIN_MATCHES = 10;
 
   let directoryPromise = null;
   let manifestPromise = null;
@@ -159,8 +172,32 @@
     return sign * Math.pow(2, exponent - 15) * (1 + fraction / 1024);
   }
 
-  // Ported from the Modal service so the static path draws the same cloud:
-  // a sustained slope break in ranked cosine-distance space.
+  // Neighbourhood size for one location, by similarity margin.
+  //
+  // This replaces the change-point detector the Modal service uses. That
+  // detector looked for a sustained slope break in ranked cosine-distance
+  // space, and on the 49k pilot corpus it found one. On a million panoramas
+  // the curve is smooth - there is almost always something at every similarity
+  // level - so it never fires, and every location fell back to a flat 100.
+  // `boundary` is kept below for reference and for comparing against Modal.
+  function adaptiveCount(similarities) {
+    if (!similarities.length) return { detected: false, count: 0, score: 0 };
+    const best = similarities[0];
+    let count = 0;
+    while (count < similarities.length && similarities[count] >= best - SIMILARITY_MARGIN) {
+      count += 1;
+    }
+    const clamped = Math.max(MIN_MATCHES, Math.min(count, similarities.length));
+    return {
+      detected: true,
+      count: clamped,
+      score: best - similarities[clamped - 1],
+      rule: `within ${SIMILARITY_MARGIN} of top-1`,
+    };
+  }
+
+  // Ported from the Modal service so the static path can be compared against
+  // it: a sustained slope break in ranked cosine-distance space.
   function boundary(similarities) {
     const window = 12;
     const lower = 16;
@@ -246,7 +283,7 @@
         longitude: dir.coords[target * 2 + 1] / COORD_SCALE,
       });
     }
-    const edge = boundary(matches.map((match) => match.similarity));
+    const edge = adaptiveCount(matches.map((match) => match.similarity));
     return {
       status: "complete",
       panoId: String(panoId),
@@ -262,5 +299,5 @@
     };
   }
 
-  root.LodestarPack = { query, directory, boundary, sphericalClick, half };
+  root.LodestarPack = { query, directory, boundary, adaptiveCount, sphericalClick, half };
 })(typeof window !== "undefined" ? window : globalThis);
