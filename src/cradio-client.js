@@ -189,9 +189,11 @@
         effectiveLocations: 1 / allMatches.reduce((sum, item) => sum + item.posteriorWeight ** 2, 0),
         displayedLocations: visualMatches.length,
         displayedMass: visualMatches.reduce((sum, item) => sum + item.posteriorWeight, 0),
-        displayPolicy: boundary.detected
-          ? "exact Modal C-RADIO slope boundary"
-          : "exact Modal C-RADIO nearest references; no sustained boundary",
+        displayPolicy: raw.source === "lodestar-static-pack"
+          ? `full cloud from ${Number(raw.corpusSize).toLocaleString()} panoramas; core ${raw.clickRule || "by similarity margin"}`
+          : boundary.detected
+            ? "exact Modal C-RADIO slope boundary"
+            : "exact Modal C-RADIO nearest references; no sustained boundary",
         broadDistributionUsedForClick: false,
         semanticMaximumFraction: null,
         temperature: null,
@@ -203,6 +205,13 @@
         expectedScore: null,
         source: "modal-cradio",
       },
+      // How many of the drawn matches form the strong core. The whole cloud is
+      // drawn - that is the point of the corpus - but the core is what steers
+      // the suggested click, and the map draws it differently so the shape is
+      // readable instead of a uniform smear.
+      coreCount: Math.max(1, Math.min(
+        Number(raw.clickCount) || Math.min(50, visualMatches.length),
+        visualMatches.length)),
       visualMatches,
     };
     return {
