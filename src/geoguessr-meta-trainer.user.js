@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.24
+// @version      2.2.0-beta.25
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -1730,13 +1730,34 @@
     return `${panoId}@${Math.round(Number(heading) || 0)}`;
   }
 
+  // The parking area is sized to match the peek, because Street View chooses
+  // its tile resolution from the size of the element it is built in. Building
+  // in a small box and then moving into a near-fullscreen peek gave a widget
+  // that upscaled low-resolution tiles - softer than before these were warmed
+  // at all, when each was constructed directly in the peek at full size.
+  function peekSize() {
+    // matches `.omt-board-peek { inset: 62px 2vw 40px }` less the caption
+    return {
+      width: Math.max(320, Math.round(window.innerWidth * 0.96)),
+      height: Math.max(240, window.innerHeight - 62 - 40 - 34),
+    };
+  }
+
   function nativePanoAtticElement() {
     if (!nativePanoAttic || !nativePanoAttic.isConnected) {
       nativePanoAttic = document.createElement("div");
       nativePanoAttic.setAttribute("aria-hidden", "true");
       nativePanoAttic.style.cssText =
-        "position:fixed;left:-10000px;top:0;width:720px;height:420px;pointer-events:none;";
+        "position:fixed;left:-20000px;top:0;pointer-events:none;";
       document.body.appendChild(nativePanoAttic);
+    }
+    const { width, height } = peekSize();
+    // keep it current: a window resized between warming and hovering would
+    // otherwise leave the widgets built for the old dimensions
+    if (nativePanoAttic.dataset.width !== String(width)) {
+      nativePanoAttic.style.width = `${width}px`;
+      nativePanoAttic.style.height = `${height}px`;
+      nativePanoAttic.dataset.width = String(width);
     }
     return nativePanoAttic;
   }
