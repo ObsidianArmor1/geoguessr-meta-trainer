@@ -444,6 +444,23 @@
         if (!anchor) return null;
         const raw = await pack.queryRow(anchor.row, 300);
         if (!raw) return null;
+        // How similar the anchor actually is to the round.
+        //
+        // When the anchor came from the round's own matches this is known
+        // already. When it is merely the nearest panorama to the guess - which
+        // is most guesses, since a guess is rarely within the radius of one of
+        // the 300 - it was reported as 0.000, which reads as "nothing alike"
+        // rather than "not measured". Cosine similarity is symmetric, so the
+        // round may appear in the ANCHOR's row; that gives the exact value for
+        // free, out of a row already fetched.
+        const roundPanoId = String(context.roundPanoId || "");
+        let reciprocal = null;
+        if (anchorRank === null && roundPanoId) {
+          const found = raw.matches.find((match) => match.panoId === roundPanoId);
+          if (found) reciprocal = found;
+        }
+        const similarityToRound = anchorRank ? anchor.similarity
+          : reciprocal ? reciprocal.similarity : null;
         const adapted = adaptResponse(raw, { ...context, panoId: raw.panoId });
         return {
           ...adapted,
@@ -456,7 +473,14 @@
             // rank in the ROUND's matches, or null when nothing similar to the
             // round was within the radius and this is merely the nearest
             roundRank: anchorRank,
-            similarityToRound: anchorRank ? anchor.similarity : null,
+            similarityToRound,
+            // where the round sits in the anchor's own ranking, when the anchor
+            // is not in the round's
+            reciprocalRank: reciprocal ? reciprocal.rank : null,
+            // null similarity means genuinely unmeasured: neither panorama is in
+            // the other's top 300, so all that is known is that it is weaker
+            // than the weakest of those.
+            unmeasured: similarityToRound === null,
             selectedBy: anchorRank ? "strongest round match within radius" : "nearest corpus panorama",
             radiusKm: withinKm,
           },
@@ -520,7 +544,13 @@
         view: thumbnail(anchor.panoId, Number(anchor.heading ?? 0)),
         distanceFromGuessKm: Number(anchor.distanceFromGuessKm) || 0,
         globalPanoRank: anchor.roundRank,
-        viewSimilarity: Number(anchor.similarityToRound) || 0,
+        // `Number.isFinite(Number(null))` is true, because Number(null) is 0 -
+        // so checking the coerced value keeps the very case this is meant to
+        // exclude, and prints 0.000 for an unmeasured likeness.
+        viewSimilarity: anchor.similarityToRound === null || anchor.similarityToRound === undefined
+          ? null : Number(anchor.similarityToRound),
+        reciprocalRank: anchor.reciprocalRank ?? null,
+        unmeasured: anchor.unmeasured === true,
         candidatePool: Number(anchor.candidatePool) || matches.length,
       } : null;
       // how many separate places the tiles point at, at a 25 km grain

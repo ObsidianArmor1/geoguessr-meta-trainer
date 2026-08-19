@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.17
+// @version      2.2.0-beta.18
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -1834,10 +1834,21 @@
           ? `${Math.round(item.distanceFromGuessKm * 1000)} m`
           : `${item.distanceFromGuessKm.toFixed(1)} km`;
         const rank = Number.isFinite(item.globalPanoRank)
-          ? `global pano match #${item.globalPanoRank}`
-          : "outside the adaptive visual set";
+          ? `#${item.globalPanoRank} most similar to this round`
+          : Number.isFinite(item.reciprocalRank)
+            ? `this round is #${item.reciprocalRank} most similar to it`
+            : "not within either panorama's 300 closest";
         const label = `Best visual case near your guess · heading ${item.heading}°`;
-        const detail = `${Number(item.viewSimilarity).toFixed(3)} ${mode.similarityLabel || "view similarity"} · ${distance} from guess · ${rank}`;
+        // A similarity of 0.000 was being printed for an anchor whose likeness
+        // to the round had never been measured, which reads as "nothing alike"
+        // rather than "not measured".
+        // null and undefined must not survive Number(): both coerce to 0, which
+        // would print "0.000 panorama similarity" for something never measured.
+        const strength = item.viewSimilarity === null || item.viewSimilarity === undefined
+          || !Number.isFinite(Number(item.viewSimilarity))
+          ? ""
+          : `${Number(item.viewSimilarity).toFixed(3)} ${mode.similarityLabel || "view similarity"} · `;
+        const detail = `${strength}${distance} from guess · ${rank}`;
         return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess · ${item.heading}°</span><em>${esc(detail)}</em></button>`;
       }
       const distance = item.distanceKm < 1
@@ -2162,7 +2173,7 @@
       ? `<b>Shared visual match</b><span>round #${point.roundRank} · similarity ${point.roundSimilarity.toFixed(3)}<br>guess #${point.guessRank} · similarity ${point.guessSimilarity.toFixed(3)}</span>`
       : point.comparisonSide === "guess"
         ? `<b style="color:${esc(state.guessDotColor)}">Guess-side visual match #${point.guessRank || point.rank}</b><span>${esc(distance)} from its anchor<br>similarity ${Number(point.guessSimilarity || point.similarity).toFixed(3)}</span>`
-        : `<b style="color:${esc(state.neighborDotColor)}">Round visual match #${point.roundRank || point.rank}</b><span>${esc(distance)}<br>similarity ${Number(point.roundSimilarity || point.similarity).toFixed(3)} · click influence ${(Number(point.roundPosteriorWeight || point.posteriorWeight || 0) * 100).toFixed(1)}%</span>`;
+        : `<b style="color:${esc(state.neighborDotColor)}">Round visual match #${point.roundRank || point.rank}</b><span>${esc(distance)}<br>similarity ${Number(point.roundSimilarity || point.similarity).toFixed(3)} · #${Number(point.roundRank || point.rank)} most similar</span>`;
     const heading = point.current
       ? `<b>This round</b><span>GeoGuessr's revealed location<br>four stored directions</span>`
       : point.family
@@ -3454,7 +3465,7 @@
       try {
         const comparison = await cradioClient.guessNeighborhood(
           guess,
-          { sourceMapKey: review.sourceMapKey },
+          { sourceMapKey: review.sourceMapKey, roundPanoId: review.location?.panoId },
           review.visualNeighborhood?.visualMatches || [],
         );
         if (token !== state.requestToken || state.review !== review
