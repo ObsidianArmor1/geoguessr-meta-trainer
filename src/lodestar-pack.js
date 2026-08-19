@@ -326,6 +326,10 @@
       latitude: dir.coords[bestRow * 2] / COORD_SCALE,
       longitude: dir.coords[bestRow * 2 + 1] / COORD_SCALE,
     };
+    // Its own spawn heading, so a caller can frame it along the road like every
+    // other panorama. Without this the guess tile fell back to 0 and pointed
+    // due north while the rest of the board looked down the street.
+    found.heading = await headingOf(bestRow);
     found.distanceKm = haversineKm(target[0], target[1], found.latitude, found.longitude);
     if (Number.isFinite(options.withinKm) && found.distanceKm > options.withinKm) return null;
     return found;

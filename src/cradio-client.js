@@ -492,7 +492,10 @@
             latitude: anchor.latitude,
             longitude: anchor.longitude,
             distanceFromGuessKm: anchor.distanceKm,
-            heading: Number.isFinite(Number(anchor.heading)) ? Number(anchor.heading) : null,
+            // raw.heading is the anchor row's own spawn heading, so this holds
+            // even if the anchor arrived without one.
+            heading: Number.isFinite(Number(anchor.heading)) ? Number(anchor.heading)
+              : Number.isFinite(Number(raw.heading)) ? Number(raw.heading) : null,
             // rank in the ROUND's matches, or null when nothing similar to the
             // round was within the radius and this is merely the nearest
             roundRank: anchorRank,
