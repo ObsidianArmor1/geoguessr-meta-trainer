@@ -265,11 +265,62 @@
     ];
   }
 
+  // Nearest corpus panorama to a coordinate. The directory holds every row's
+  // position, so this is a scan over 999,693 pairs of int32s - a few tens of
+  // milliseconds - and needs no server and no index.
+  //
+  // This is what the guess-side cloud is built on: the 50k-era feature took the
+  // nearest panorama in the MAP to the player's guess and drew its
+  // neighbourhood. The corpus is no longer the map, so "nearest in the map"
+  // becomes "nearest in the corpus", which is strictly more available.
+  async function nearest(latitude, longitude, options = {}) {
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    const dir = await directory();
+    const target = [latitude, longitude];
+    const cosLat = Math.cos((latitude * Math.PI) / 180);
+    let bestRow = -1;
+    let bestScore = Infinity;
+    // squared degrees, longitude scaled by cos(latitude): monotone in true
+    // distance over any plausible search area, and avoids 1M trig calls
+    for (let row = 0; row < dir.rows; row += 1) {
+      const dLat = dir.coords[row * 2] / COORD_SCALE - latitude;
+      const dLng = (dir.coords[row * 2 + 1] / COORD_SCALE - longitude) * cosLat;
+      const score = dLat * dLat + dLng * dLng;
+      if (score < bestScore) { bestScore = score; bestRow = row; }
+    }
+    if (bestRow < 0) return null;
+    const found = {
+      row: bestRow,
+      panoId: dir.decoder.decode(
+        dir.ids.subarray(bestRow * ID_BYTES, (bestRow + 1) * ID_BYTES)),
+      latitude: dir.coords[bestRow * 2] / COORD_SCALE,
+      longitude: dir.coords[bestRow * 2 + 1] / COORD_SCALE,
+    };
+    found.distanceKm = haversineKm(target[0], target[1], found.latitude, found.longitude);
+    if (Number.isFinite(options.withinKm) && found.distanceKm > options.withinKm) return null;
+    return found;
+  }
+
+  function haversineKm(aLat, aLng, bLat, bLng) {
+    const r = Math.PI / 180;
+    const dLat = (bLat - aLat) * r;
+    const dLng = (bLng - aLng) * r;
+    const h = Math.sin(dLat / 2) ** 2
+      + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLng / 2) ** 2;
+    return 2 * 6371.0088 * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
   async function query(panoId, count) {
-    const started = Date.now();
     const dir = await directory();
     const row = dir.rowOf.get(String(panoId));
     if (row === undefined) return null;          // not in the corpus: caller falls back
+    return queryRow(row, count);
+  }
+
+  async function queryRow(row, count) {
+    const started = Date.now();
+    const dir = await directory();
+    const panoId = dir.decoder.decode(dir.ids.subarray(row * ID_BYTES, (row + 1) * ID_BYTES));
     const info = dir.info;
     const k = info.neighborsPerPanorama;
     const wanted = Math.max(1, Math.min(Number(count) || k, k));
@@ -314,5 +365,8 @@
     };
   }
 
-  root.LodestarPack = { query, directory, boundary, adaptiveCount, sphericalClick, half };
+  root.LodestarPack = {
+    query, queryRow, nearest, directory, boundary, adaptiveCount,
+    sphericalClick, half, haversineKm,
+  };
 })(typeof window !== "undefined" ? window : globalThis);
