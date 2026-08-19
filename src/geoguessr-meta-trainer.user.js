@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.22
+// @version      2.2.0-beta.23
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -2179,6 +2179,34 @@
     }
   }
 
+  // One shape for every match tooltip.
+  //
+  // The three variants had drifted apart: the shared one showed no distance at
+  // all, the guess-side one said "from its anchor" and left the rank out of the
+  // detail line, and the round-side one printed its rank twice. Same facts in
+  // the same order every time - rank first, because that is the question being
+  // asked of a dot, then similarity, then how far away and from what.
+  //
+  // Distance means something different on each side - from the round, or from
+  // the panorama the guess cloud is built around - so it now says which.
+  function matchTooltipHeading(point, distance) {
+    const roundRank = Number(point.roundRank || point.rank) || 0;
+    const guessRank = Number(point.guessRank || point.rank) || 0;
+    const roundSimilarity = Number(point.roundSimilarity || point.similarity) || 0;
+    const guessSimilarity = Number(point.guessSimilarity || point.similarity) || 0;
+    if (point.comparisonSide === "both") {
+      return `<b>In both clouds</b><span>`
+        + `#${roundRank} most similar to this round · ${roundSimilarity.toFixed(3)}<br>`
+        + `#${guessRank} most similar to your guess anchor · ${guessSimilarity.toFixed(3)}</span>`;
+    }
+    if (point.comparisonSide === "guess") {
+      return `<b style="color:${esc(state.guessDotColor)}">#${guessRank} most similar to your guess anchor</b>`
+        + `<span>similarity ${guessSimilarity.toFixed(3)} · ${esc(distance)} from the anchor</span>`;
+    }
+    return `<b style="color:${esc(state.neighborDotColor)}">#${roundRank} most similar to this round</b>`
+      + `<span>similarity ${roundSimilarity.toFixed(3)} · ${esc(distance)} from the round</span>`;
+  }
+
   function positionMatchTooltip(tooltip, clientX, clientY) {
     state.matchTooltipClientX = clientX;
     state.matchTooltipClientY = clientY;
@@ -2277,13 +2305,9 @@
     if (point.comparisonSide === "both") tooltip.style.borderColor = "#ffffff";
     tooltip.classList.toggle("omt-match-tooltip-expanded", state.matchTooltipShift);
     const distance = point.distanceKm < 1
-      ? `${Math.round(point.distanceKm * 1000)} m away`
-      : `${point.distanceKm.toFixed(1)} km away`;
-    const visualHeading = point.comparisonSide === "both"
-      ? `<b>Shared visual match</b><span>round #${point.roundRank} · similarity ${point.roundSimilarity.toFixed(3)}<br>guess #${point.guessRank} · similarity ${point.guessSimilarity.toFixed(3)}</span>`
-      : point.comparisonSide === "guess"
-        ? `<b style="color:${esc(state.guessDotColor)}">Guess-side visual match #${point.guessRank || point.rank}</b><span>${esc(distance)} from its anchor<br>similarity ${Number(point.guessSimilarity || point.similarity).toFixed(3)}</span>`
-        : `<b style="color:${esc(state.neighborDotColor)}">Round visual match #${point.roundRank || point.rank}</b><span>${esc(distance)}<br>similarity ${Number(point.roundSimilarity || point.similarity).toFixed(3)} · #${Number(point.roundRank || point.rank)} most similar</span>`;
+      ? `${Math.round(point.distanceKm * 1000)} m`
+      : `${point.distanceKm.toFixed(1)} km`;
+    const visualHeading = matchTooltipHeading(point, distance);
     const heading = point.current
       ? `<b>This round</b><span>GeoGuessr's revealed location<br>four stored directions</span>`
       : point.family
