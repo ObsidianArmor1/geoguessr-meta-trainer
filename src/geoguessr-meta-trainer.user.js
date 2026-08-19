@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.27
+// @version      2.2.0-beta.28
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -1873,14 +1873,15 @@
         const distance = item.distanceFromGuessKm < 1
           ? `${Math.round(item.distanceFromGuessKm * 1000)} m`
           : `${item.distanceFromGuessKm.toFixed(1)} km`;
+        // Only the ranks are worth the space. Whether the number came from a
+        // stored neighbour list or from the projection is a detail of how it
+        // was obtained, not something to act on.
         const rank = Number.isFinite(item.globalPanoRank)
           ? `#${item.globalPanoRank} most similar to this round`
           : Number.isFinite(item.reciprocalRank)
             ? `this round is #${item.reciprocalRank} most similar to it`
-            : item.estimated
-              ? "estimated · outside both 300-closest lists"
-              : "not within either panorama's 300 closest";
-        const label = `Best visual case near your guess · heading ${item.heading}°`;
+            : "";
+        const label = "Best visual case near your guess";
         // A similarity of 0.000 was being printed for an anchor whose likeness
         // to the round had never been measured, which reads as "nothing alike"
         // rather than "not measured".
@@ -1890,15 +1891,15 @@
           || !Number.isFinite(Number(item.viewSimilarity))
           ? ""
           : `${Number(item.viewSimilarity).toFixed(3)} ${mode.similarityLabel || "view similarity"} · `;
-        const detail = `${strength}${distance} from guess · ${rank}`;
-        return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess · ${item.heading}°</span><em>${esc(detail)}</em></button>`;
+        const detail = `${strength}${distance} from guess${rank ? ` · ${rank}` : ""}`;
+        return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess</span><em>${esc(detail)}</em></button>`;
       }
       const distance = item.distanceKm < 1
         ? `${Math.round(item.distanceKm * 1000)} m`
         : `${item.distanceKm.toFixed(1)} km`;
-      const label = `Visual match #${item.rank} · heading ${item.heading}°${item.reciprocal ? " · mutual match" : ""}`;
+      const label = `Visual match #${item.rank}${item.reciprocal ? " · mutual match" : ""}`;
       const detail = `${Number(item.viewSimilarity).toFixed(3)} ${mode.similarityLabel || "view similarity"} · ${distance}`;
-      return `<button class="omt-board-match" data-board-entry="${item.mapIndex}" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Visual match ${item.rank}"><span>#${item.rank} · ${item.heading}°${item.reciprocal ? " · mutual" : ""}</span><em>${esc(detail)}</em></button>`;
+      return `<button class="omt-board-match" data-board-entry="${item.mapIndex}" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Visual match ${item.rank}"><span>#${item.rank}${item.reciprocal ? " · mutual" : ""}</span><em>${esc(detail)}</em></button>`;
     }).join("");
     const interpretation = board.corpus
       ? "Closest panoramas in the corpus, each shown along its own road direction."
@@ -1912,7 +1913,7 @@
     const guessReceipt = mode.guessMatch
       ? `<span><b>best of ${mode.guessMatch.candidatePool}</b> locations near your guess</span>`
       : "";
-    element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid"><div class="omt-board-current" tabindex="0" data-board-pano="${esc(board.panoId)}" data-board-heading="${Number(mode.currentHeading) || 0}" data-board-inspect data-board-label="This round · heading ${mode.currentHeading}°" data-board-detail="Current panorama direction used for this comparison"><img data-src="${esc(mode.currentView)}" data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0" alt="Current round heading ${mode.currentHeading}"><strong>This round · ${mode.currentHeading}°</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}${board.corpus
+    element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid"><div class="omt-board-current" tabindex="0" data-board-pano="${esc(board.panoId)}" data-board-heading="${Number(mode.currentHeading) || 0}" data-board-inspect data-board-label="This round" data-board-detail="The panorama this round spawned on"><img data-src="${esc(mode.currentView)}" data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0" alt="Current round heading ${mode.currentHeading}"><strong>This round</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}${board.corpus
         ? `<span><b>${mode.support}</b> of ${mode.supportOf} in the close core</span><span><b>${mode.independentAreas}</b> separate areas</span>`
         : `<span><b>${literal ? "nearest visual views" : `${mode.support}/100`}</b> in this group</span><span><b>${mode.reciprocalSupport}</b> mutual matches</span><span><b>${mode.independentAreas}</b> separate areas</span><span><b>${Math.round(mode.coherence * 100)}%</b> visual agreement</span>`}<span class="omt-board-warning">Visual similarity is evidence, not certainty.</span></footer>`;
     state.shadow.appendChild(element);
