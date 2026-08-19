@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.30
+// @version      2.2.0-beta.31
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -420,13 +420,8 @@
     }
     const id = String(panoId);
     if (modalRoundPromises.has(id)) return modalRoundPromises.get(id);
-    const pending = cradioClient.prefetch(id, context).then((result) => {
-      // Tile one of the board: the round itself, the panorama every comparison
-      // is made against and the one a player flips back to.
-      const heading = Number(result?.response?.location?.spawnHeading);
-      if (result?.ok && Number.isFinite(heading)) warmPanoramaOnStage(id, heading);
-      return result;
-    }).catch(() => ({ ok: false, reason: "network-error" }));
+    const pending = cradioClient.prefetch(id, context)
+      .catch(() => ({ ok: false, reason: "network-error" }));
     modalRoundPromises.set(id, pending);
     if (modalRoundPromises.size > 128) {
       modalRoundPromises.delete(modalRoundPromises.keys().next().value);
@@ -1790,70 +1785,6 @@
       trimNativePanoCache();
     }
     return panorama;
-  }
-
-  // Warm a panorama by building it where it can actually load.
-  //
-  // Street View defers its tile fetches until the element is on screen - not
-  // until it is a particular size, which is why sizing an off-screen parking
-  // area to the peek did nothing. So the widget is built in a stage that is
-  // genuinely in the viewport and simply invisible: opacity near zero, no
-  // pointer events. Occlusion does not matter, only being in the viewport.
-  //
-  // The stage is transient. Once the widget has loaded it moves to the
-  // off-screen parking area, which is known to preserve what it has already
-  // fetched - that is exactly what makes returning to a hovered tile instant.
-  // So the compositing cost lasts a few seconds per panorama rather than for
-  // the whole round, which is why this is worth doing for one or two tiles and
-  // not for all nine.
-  const WARM_STAGE_GRACE_MS = 1800;
-  let warmStage = null;
-
-  function warmStageElement() {
-    if (!warmStage || !warmStage.isConnected) {
-      warmStage = document.createElement("div");
-      warmStage.setAttribute("aria-hidden", "true");
-      warmStage.style.cssText =
-        "position:fixed;left:0;top:0;z-index:0;opacity:0.012;pointer-events:none;";
-      document.body.appendChild(warmStage);
-    }
-    const { width, height } = peekSize();
-    warmStage.style.width = `${width}px`;
-    warmStage.style.height = `${height}px`;
-    return warmStage;
-  }
-
-  function warmPanoramaOnStage(panoId, heading) {
-    if (!panoId || !pageWindow.google?.maps?.StreetViewPanorama) return;
-    const key = nativePanoKey(panoId, heading);
-    if (nativePanoCache.has(key)) return;
-    const host = document.createElement("div");
-    host.className = "omt-native-pano";
-    host.style.cssText = "width:100%;height:100%;";
-    warmStageElement().appendChild(host);
-    const panorama = nativeStreetView(host, panoId, heading);
-    if (!panorama) {
-      host.remove();
-      return;
-    }
-    nativePanoCache.set(key, { host, panorama, usedAt: Date.now() });
-    trimNativePanoCache();
-    // Move it off screen once it has painted, or after a ceiling, so a
-    // panorama that never resolves does not stay composited forever.
-    const began = Date.now();
-    const park = () => {
-      if (host.isConnected && host.parentElement === warmStage) {
-        nativePanoAtticElement().appendChild(host);
-      }
-    };
-    const settle = () => {
-      if (!host.isConnected) return;
-      const ready = host.classList.contains("omt-native-pano-ready");
-      if (ready) return window.setTimeout(park, WARM_STAGE_GRACE_MS);
-      if (Date.now() - began > 9000) return park();
-      window.setTimeout(settle, 200);
-    };
-    window.setTimeout(settle, 300);
   }
 
   // Park every cached widget still inside `scope`, so removing `scope` does not
@@ -3462,11 +3393,6 @@
         if (!anchor) return;
         // pulls the anchor's chunk into the cache, which is the slow part
         await pack.queryRow(anchor.row, 300);
-        // and tile two of the board, which is this panorama. Moving the pin
-        // warms a different one; the cache keeps whichever have been built.
-        if (Number.isFinite(anchor.heading)) {
-          warmPanoramaOnStage(anchor.panoId, anchor.heading);
-        }
       } catch (_error) {
         // a warm that fails costs nothing; the real load will try again
       }
