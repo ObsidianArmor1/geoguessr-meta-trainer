@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.3
+// @version      2.2.0-beta.4
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -314,7 +314,7 @@
       ? state.guessNeighborhood
       : null;
     const overlap = guess?.overlap;
-    return `<div class="omt-legend">${state.showVisualNeighbors && neighborhood?.visualMatches?.length ? `<i class="omt-legend-match omt-legend-round-match"></i> round matches · size = similarity <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click` : ""}${guess ? `<i class="omt-legend-match omt-legend-guess-match"></i> guess matches <i class="omt-legend-match omt-legend-shared-match"></i> shared${overlap ? ` (${overlap.sharedLocations})` : ""}` : ""}<i class="omt-legend-current"></i> round</div>`;
+    return `<div class="omt-legend">${state.showVisualNeighbors && neighborhood?.visualMatches?.length ? `<i class="omt-legend-match omt-legend-round-match"></i> closest matches <i class="omt-legend-match omt-legend-tail-match"></i> wider distribution <i class="omt-legend-pin omt-legend-pin-neighbors"></i> suggested click` : ""}${guess ? `<i class="omt-legend-match omt-legend-guess-match"></i> guess matches <i class="omt-legend-match omt-legend-shared-match"></i> shared${overlap ? ` (${overlap.sharedLocations})` : ""}` : ""}<i class="omt-legend-current"></i> round</div>`;
   }
 
   function request(path, options = {}) {
@@ -843,6 +843,7 @@
     .omt-legend-dot { display:inline-block; width:8px; height:8px; margin:0 4px 0 1px; border:1px solid #fff; border-radius:50%; background:#767981; }
     .omt-legend-match { display:inline-block; width:8px; height:8px; margin:0 4px 0 8px; border:1px solid #fff; border-radius:50%; vertical-align:-1px; }
     .omt-legend-round-match { background:var(--omt-neighbor-dot,#ff334f); }
+    .omt-legend-tail-match { background:var(--omt-neighbor-dot,#ff334f); opacity:.45; transform:scale(.62); }
     .omt-legend-guess-match { background:var(--omt-guess-dot,#244cff); }
     .omt-legend-shared-match { background:linear-gradient(90deg,var(--omt-neighbor-dot,#ff334f) 0 50%,var(--omt-guess-dot,#244cff) 50%); }
     .omt-legend-current { display:inline-block; width:9px; height:9px; margin:0 4px 0 7px; border:2px solid #fff; border-radius:50%; background:#17181b; }
@@ -2228,6 +2229,7 @@
             // can be hovered before the full review has populated state.review.
             datasetKey: value.datasetKey || options.datasetKey || "",
             comparisonSide: value.comparisonSide || options.comparisonSide || "round",
+            core: value.core === true,
             roundRank: Number(value.roundRank || 0),
             guessRank: Number(value.guessRank || 0),
             roundSimilarity: Number(value.roundSimilarity || 0),
@@ -2436,7 +2438,14 @@
             visible += 1;
             const { x, y } = pixel;
             const strength = Math.max(0, Math.min(1, point.strength));
-            const pointRadius = neighborBaseRadius * (0.88 + strength * 0.20);
+            // The cloud is drawn whole, so core and tail have to be told apart
+            // by eye: the core is larger, opaque and outlined; the tail is
+            // smaller and translucent, reading as the shape around the core
+            // rather than as equally-good answers.
+            const pointRadius = point.core
+              ? neighborBaseRadius * (1.18 + strength * 0.30)
+              : neighborBaseRadius * (0.62 + strength * 0.16);
+            context.globalAlpha = point.core ? 1 : 0.45;
             if (point.comparisonSide === "both") {
               // One split marker communicates overlap without stacking rings or
               // privileging whichever layer happened to paint last.
@@ -2460,9 +2469,12 @@
             }
             context.beginPath();
             context.arc(x, y, pointRadius, 0, Math.PI * 2);
-            context.strokeStyle = "rgba(255,255,255,0.82)";
-            context.lineWidth = 1;
+            context.strokeStyle = point.core
+              ? "rgba(255,255,255,0.9)"
+              : "rgba(255,255,255,0.22)";
+            context.lineWidth = point.core ? 1.2 : 0.6;
             context.stroke();
+            context.globalAlpha = 1;
             const hitRadius = Math.max(9, pointRadius + 4);
             visibleHitTargets.push({ point, x, y, hitRadius });
           }
@@ -2683,9 +2695,12 @@
     const guessMatches = guessComparison?.visualNeighborhood?.visualMatches || [];
     if (state.showVisualNeighbors && visualMatches.length) {
       const combined = new Map();
+      const coreCount = Number(context.visualNeighborhood?.coreCount)
+        || Math.min(50, visualMatches.length);
       for (const match of visualMatches) {
         combined.set(match.mapIndex, {
           ...match,
+          core: Number(match.rank) <= coreCount,
           comparisonSide: "round",
           roundRank: match.rank,
           roundSimilarity: match.similarity,
