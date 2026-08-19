@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.6
+// @version      2.2.0-beta.7
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -2950,9 +2950,11 @@
     if (review.universal) {
       // Corpus path: no dataset to query, so the pack answers directly.
       try {
-        const comparison = await cradioClient.guessNeighborhood(guess, {
-          sourceMapKey: review.sourceMapKey,
-        });
+        const comparison = await cradioClient.guessNeighborhood(
+          guess,
+          { sourceMapKey: review.sourceMapKey },
+          review.visualNeighborhood?.visualMatches || [],
+        );
         if (token !== state.requestToken || state.review !== review
             || !state.showGuessNeighbors) return;
         if (!comparison) return;
