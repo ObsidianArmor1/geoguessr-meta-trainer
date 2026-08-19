@@ -227,6 +227,8 @@
       location: {
         mapIndex: -1,
         panoId,
+        // the corpus's own heading for this panorama, which view 0 looks along
+        spawnHeading: Number.isFinite(Number(raw.heading)) ? Number(raw.heading) : null,
         latitude: origin?.latitude ?? null,
         longitude: origin?.longitude ?? null,
         headings: currentHeadings,
@@ -463,6 +465,89 @@
         console.warn("[cradio] guess-side cloud unavailable:", error && error.message);
         return null;
       }
+    }
+
+    // A visual board for the corpus path, in the shape the existing renderer
+    // already consumes - so hover-to-enlarge, click-to-open and the grid all
+    // work unchanged.
+    //
+    // Tile 1 is the round. Tile 2, when there is one, is the strongest match to
+    // the round within the radius of the player's guess: the visual case for
+    // where they clicked. The rest are the round's best matches in order.
+    //
+    // Every panorama is rendered at its OWN spawn heading, which is the framing
+    // the corpus was embedded at. The old board instead chose a view slot per
+    // candidate, which needed per-view vectors; those were never written for
+    // this corpus, and choosing the road-aligned view makes the comparison
+    // like-for-like without them.
+    buildVisualBoard(review, guessCloud, options = {}) {
+      const matches = review?.visualNeighborhood?.visualMatches || [];
+      if (!matches.length) return null;
+      const tiles = Number(options.tiles) || 8;
+      // Prefer the heading the round was actually played at; fall back to the
+      // corpus's spawn heading for this panorama, which is the framing every
+      // other tile uses. Falling back to 0 would frame the round due north
+      // against matches framed along their roads.
+      // `??` is wrong here: when the round's heading is unknown the client
+      // fills headings[0] with 0, which is a real value and would win, framing
+      // the round due north against matches framed along their roads. Take the
+      // first heading that is actually informative.
+      const roundHeading = [
+        review.location?.roundHeading,
+        review.location?.headings?.[0],
+        review.location?.spawnHeading,
+      ].map(Number).find((value) => Number.isFinite(value) && value !== 0) || 0;
+      const entry = (match, index) => ({
+        mapIndex: match.mapIndex,
+        panoId: match.panoId,
+        heading: Math.round(Number(match.heading ?? 0)),
+        view: thumbnail(match.panoId, Number(match.heading ?? 0)),
+        rank: match.rank ?? index + 1,
+        viewSimilarity: match.similarity,
+        distanceKm: match.distanceKm ?? 0,
+        reciprocal: false,
+      });
+      const anchor = guessCloud?.guessAnchor || null;
+      const guessMatch = anchor ? {
+        kind: "guess-local",
+        mapIndex: -2,
+        panoId: anchor.panoId,
+        heading: Math.round(Number(anchor.heading ?? 0)),
+        view: thumbnail(anchor.panoId, Number(anchor.heading ?? 0)),
+        distanceFromGuessKm: Number(anchor.distanceFromGuessKm) || 0,
+        globalPanoRank: anchor.roundRank,
+        viewSimilarity: Number(anchor.similarityToRound) || 0,
+        candidatePool: Number(anchor.candidatePool) || matches.length,
+      } : null;
+      // how many separate places the tiles point at, at a 25 km grain
+      const areas = [];
+      for (const match of matches.slice(0, tiles)) {
+        if (!areas.some((seat) => haversineKm(seat[0], seat[1], match.latitude, match.longitude) < 25)) {
+          areas.push([match.latitude, match.longitude]);
+        }
+      }
+      return {
+        corpus: true,
+        panoId: review.location?.panoId || "",
+        mapIndex: -1,
+        datasetKey: review.datasetKey,
+        defaultMode: "consensus",
+        modes: [{
+          id: "consensus",
+          label: "Closest matches",
+          currentSlot: 0,
+          currentHeading: Math.round(roundHeading),
+          currentView: thumbnail(review.location?.panoId || "", roundHeading),
+          similarityLabel: "panorama similarity",
+          entries: matches.slice(0, tiles).map(entry),
+          guessMatch,
+          support: review.visualNeighborhood?.coreCount || matches.length,
+          supportOf: matches.length,
+          reciprocalSupport: null,
+          independentAreas: areas.length,
+          coherence: null,
+        }],
+      };
     }
 
     async fromPack(panoId, context) {
