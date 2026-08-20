@@ -45,6 +45,16 @@ or inspect the joined `wk-….ws-…` proxy token. The credential stays in
 Tampermonkey storage and is sent only in the request's authorization header.
 Known Lodestar rows never consume Modal inference.
 
+### Pack V2 migration
+
+`src/lodestar-pack-v2.js` implements the range-addressable successor to the
+global directory. A known pano fetches one small hash-bucket index and one
+self-contained ~8 KB row range, so cold bytes and browser memory no longer grow
+with the corpus. It also carries a lazy static geographic index for guess-side
+comparison. V2 remains disabled until the full public host passes range, parity,
+latency, and real-browser checks; `lodestar-pack.js` keeps V1 as an automatic
+rollback path.
+
 ## What the review means
 
 - Every displayed point is a visually similar reference panorama, not a claim
@@ -68,6 +78,8 @@ share the same retrieval and review components.
 npm run check
 npm run test:cradio
 npm run test:lodestar
+npm run test:lodestar-v2
+npm run benchmark:lodestar-v2 -- ../lodestar-range-pack-v2 250
 npm run test:live-challenge
 npm run test:smoke
 ```

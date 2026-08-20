@@ -196,7 +196,7 @@
         effectiveLocations: 1 / allMatches.reduce((sum, item) => sum + item.posteriorWeight ** 2, 0),
         displayedLocations: visualMatches.length,
         displayedMass: visualMatches.reduce((sum, item) => sum + item.posteriorWeight, 0),
-        displayPolicy: raw.source === "lodestar-static-pack"
+        displayPolicy: String(raw.source || "").startsWith("lodestar-static-pack")
           ? `full cloud from ${Number(raw.corpusSize).toLocaleString()} panoramas; core ${raw.clickRule || "by similarity margin"}`
           : boundary.detected
             ? "exact Modal C-RADIO slope boundary"
@@ -435,20 +435,16 @@
           const km = pack.haversineKm(latitude, longitude, match.latitude, match.longitude);
           if (km <= withinKm) { anchor = { ...match, distanceKm: km }; anchorRank = match.rank; break; }
         }
-        if (anchor) {
-          const dir = await pack.directory();
-          anchor.row = dir.rowOf.get(String(anchor.panoId));
-        }
         // A guess in the ocean would otherwise anchor to whatever continent is
         // least far away - measured at 1,117 km for a mid-Pacific guess. The
         // original could not do this because it searched only the map's own
         // panoramas; a corpus-wide search needs the cap put back explicitly.
-        if (!anchor || anchor.row === undefined) {
+        if (!anchor) {
           anchor = await pack.nearest(latitude, longitude, { withinKm: 100 });
           anchorRank = null;
         }
         if (!anchor) return null;
-        const raw = await pack.queryRow(anchor.row, 300);
+        const raw = await pack.query(anchor.panoId, 300);
         if (!raw) return null;
         // How similar the anchor actually is to the round.
         //
