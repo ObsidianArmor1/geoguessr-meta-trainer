@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.35
+// @version      2.2.0-beta.36
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -2866,8 +2866,9 @@
             const point = { ...this.current, current: true, rank: 0, distanceKm: 0, similarity: 1 };
             const button = document.createElement("button");
             button.type = "button";
-            button.title = "This round — hover to preview; click to open Street View";
-            button.setAttribute("aria-label", button.title);
+            button.removeAttribute("title");
+            button.setAttribute("aria-label",
+              "This round — hover to preview; click to open Street View");
             button.style.position = "absolute";
             button.style.display = "none";
             button.style.padding = "0";
@@ -3090,8 +3091,13 @@
             const side = target.point.comparisonSide === "both"
               ? "Shared round/guess"
               : target.point.comparisonSide === "guess" ? "Guess-side" : "Round";
-            button.title = `${side} visual match — preview; click to open Street View`;
-            button.setAttribute("aria-label", button.title);
+            // No `title`: the browser's own tooltip duplicates the preview
+            // panel this script shows on hover, and drifts in over the top of
+            // it. The aria-label carries the same text for screen readers
+            // without rendering anything.
+            button.removeAttribute("title");
+            button.setAttribute("aria-label",
+              `${side} visual match — preview; click to open Street View`);
             button.style.display = "block";
             button.style.left = `${target.x - target.hitRadius}px`;
             button.style.top = `${target.y - target.hitRadius}px`;
@@ -3142,8 +3148,9 @@
               const visiblePoint = visibleFamilyPoints[Math.floor(index * step)];
               const button = this.familyHitPool[index];
               button.omtPoint = visiblePoint.point;
-              button.title = `${visiblePoint.point.familyLabel || "Meta location"} — preview; click to open Street View`;
-              button.setAttribute("aria-label", button.title);
+              button.removeAttribute("title");
+              button.setAttribute("aria-label",
+                `${visiblePoint.point.familyLabel || "Meta location"} — preview; click to open Street View`);
               button.style.display = "block";
               button.style.left = `${visiblePoint.x - hitRadius}px`;
               button.style.top = `${visiblePoint.y - hitRadius}px`;
