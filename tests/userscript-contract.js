@@ -56,5 +56,11 @@ assert.match(source, /entry\.panorama\.setPano\?\.\(String\(panoId\)\)/,
   "the renderer pool retargets rather than accumulating WebGL contexts");
 assert.doesNotMatch(source, /NATIVE_PANO_CACHE_LIMIT = 12/,
   "the context-evicting 12-renderer cache must not return");
+assert.match(source, /function passiveMapIcon\(/,
+  "recommendation icons use a dedicated non-interactive overlay");
+assert.match(source, /pointer-events:none;user-select:none;z-index:/,
+  "recommendation icons never capture a nearby panorama's hover target");
+assert.doesNotMatch(source, /new maps\.Marker\(/,
+  "recommendation pins must not use Google Marker hit regions");
 
 process.stdout.write("userscript architecture contract passed\n");

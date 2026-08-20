@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.55
+// @version      2.2.0-beta.56
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.55";
+  const USERSCRIPT_VERSION = "2.2.0-beta.56";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -3722,6 +3722,54 @@
     return state.pinIcons;
   }
 
+  // Google Maps' Marker `clickable: false` still owns a mouse target in some
+  // renderer/browser combinations. That invisible hit region covered nearby
+  // panorama buttons whenever the recommended click landed on a dot. Draw the
+  // same icon in a pointer-transparent OverlayView instead: visually above the
+  // cloud, but completely absent from hit testing.
+  function passiveMapIcon(maps, map, position, icon, label, zIndex = 1000) {
+    if (!maps?.OverlayView || !map || !position || !icon?.url) return null;
+    class PassiveIconOverlay extends maps.OverlayView {
+      constructor() {
+        super();
+        this.image = null;
+        this.setMap(map);
+      }
+      onAdd() {
+        this.image = document.createElement("img");
+        this.image.src = icon.url;
+        this.image.alt = "";
+        this.image.setAttribute("aria-hidden", "true");
+        this.image.dataset.omtPassiveMapIcon = label || "recommendation";
+        this.image.style.cssText = `position:absolute;pointer-events:none;user-select:none;z-index:${zIndex};`;
+        const width = Number(icon.scaledSize?.width || icon.size?.width) || 32;
+        const height = Number(icon.scaledSize?.height || icon.size?.height) || 32;
+        this.image.style.width = `${width}px`;
+        this.image.style.height = `${height}px`;
+        (this.getPanes().overlayMouseTarget || this.getPanes().overlayLayer)
+          .appendChild(this.image);
+      }
+      draw() {
+        if (!this.image) return;
+        const point = this.getProjection()?.fromLatLngToDivPixel(
+          new maps.LatLng(position.lat, position.lng),
+        );
+        if (!point) return;
+        const width = Number(icon.scaledSize?.width || icon.size?.width) || 32;
+        const height = Number(icon.scaledSize?.height || icon.size?.height) || 32;
+        const anchorX = Number(icon.anchor?.x);
+        const anchorY = Number(icon.anchor?.y);
+        this.image.style.left = `${point.x - (Number.isFinite(anchorX) ? anchorX : width / 2)}px`;
+        this.image.style.top = `${point.y - (Number.isFinite(anchorY) ? anchorY : height / 2)}px`;
+      }
+      onRemove() {
+        this.image?.remove();
+        this.image = null;
+      }
+    }
+    return new PassiveIconOverlay();
+  }
+
   function saveMapView(map) {
     if (state.originalMapView) return;
     const center = map.getCenter?.();
@@ -3857,34 +3905,31 @@
       }
     }
     const expected = state.showBestMeta ? detail?.click?.s?.expected : null;
-    if (expected && maps.Marker) {
-      const marker = new maps.Marker({
+    if (expected) {
+      const marker = passiveMapIcon(
+        maps,
         map,
-        position: { lat: expected.a, lng: expected.o },
-        icon: icons.ideal,
-        title: `Ideal average-score click: ${expected.n || "map coordinate"}`,
-        // Recommendation pins are labels, not interaction targets. Let pointer
-        // events fall through to an overlapping panorama preview button.
-        clickable: false,
-        zIndex: 1000,
-      });
-      state.overlays.push(marker);
+        { lat: expected.a, lng: expected.o },
+        icons.ideal,
+        `Ideal average-score click: ${expected.n || "map coordinate"}`,
+        1000,
+      );
+      if (marker) state.overlays.push(marker);
       bounds.extend({ lat: expected.a, lng: expected.o });
     }
     const neighborClick = state.showVisualNeighbors
       ? context.visualNeighborhood?.weightedClick
       : null;
-    if (neighborClick && maps.Marker) {
-      const marker = new maps.Marker({
+    if (neighborClick) {
+      const marker = passiveMapIcon(
+        maps,
         map,
-        position: { lat: neighborClick.latitude, lng: neighborClick.longitude },
-        icon: icons.neighborsIdeal,
-        title: `${context.cloud ? "Exact C-RADIO" : "Adaptive visual"} click${Number.isFinite(neighborClick.expectedScore) ? ` · ${Math.round(neighborClick.expectedScore).toLocaleString()} expected points` : ""}`,
-        // Keep every visual-match dot hoverable when the recommendation lands on it.
-        clickable: false,
-        zIndex: 1001,
-      });
-      state.overlays.push(marker);
+        { lat: neighborClick.latitude, lng: neighborClick.longitude },
+        icons.neighborsIdeal,
+        `${context.cloud ? "Exact C-RADIO" : "Adaptive visual"} click${Number.isFinite(neighborClick.expectedScore) ? ` · ${Math.round(neighborClick.expectedScore).toLocaleString()} expected points` : ""}`,
+        1001,
+      );
+      if (marker) state.overlays.push(marker);
       bounds.extend({ lat: neighborClick.latitude, lng: neighborClick.longitude });
     }
     bounds.extend({ lat: context.location.latitude, lng: context.location.longitude });
