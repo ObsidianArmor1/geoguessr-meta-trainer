@@ -62,5 +62,13 @@ assert.match(source, /pointer-events:none;user-select:none;z-index:/,
   "recommendation icons never capture a nearby panorama's hover target");
 assert.doesNotMatch(source, /new maps\.Marker\(/,
   "recommendation pins must not use Google Marker hit regions");
+assert.match(source, /await handleRoundEnd\(liveChallengeAdapter\.buildEventState\(liveRound, challengeId\)\)/,
+  "Live Challenge enters the same complete round-end pipeline as single-player");
+assert.match(source, /if \(LIVE_CHALLENGE_PATH\.test\(location\.pathname\)[\s\S]*PARTY_LOBBY_PATH\.test\(location\.pathname\)\) return;/,
+  "the event framework cannot race the authoritative Live Challenge result path");
+assert.match(source, /function discoverReactResultMaps\(\)/,
+  "result maps missed by the early Google Maps hook have a React-instance fallback");
+assert.match(source, /function trackMap\(map\)/,
+  "single-player and Live Challenge maps share overlay, hover, and guess-prefetch wiring");
 
 process.stdout.write("userscript architecture contract passed\n");

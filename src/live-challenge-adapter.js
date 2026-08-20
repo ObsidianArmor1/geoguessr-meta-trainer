@@ -6,7 +6,9 @@
   const RESULT_SELECTORS = Object.freeze([
     '[class*="result-map_roundPin"]',
     '[class*="result-map_round-pin"]',
+    '[class*="result-map_correctLocation"]',
     '[data-qa="correct-location-pin"]',
+    '[data-testid="correct-location-pin"]',
     '[data-qa="round-result"] [class*="result-map"]',
     '[data-testid="round-result"] [class*="result-map"]',
   ]);
@@ -34,6 +36,10 @@
     return trackedChallenge?.partyLobbyPath === pathnameFromUrl(pathname)
       ? trackedChallenge.id
       : null;
+  }
+
+  function isLiveChallengePage(pathname, resourceUrls = [], trackedChallenge = null) {
+    return Boolean(challengeIdForPage(pathname, resourceUrls, trackedChallenge));
   }
 
   function decodePanoId(value) {
@@ -269,6 +275,7 @@
     pathnameFromUrl,
     challengeIdFromUrl,
     challengeIdForPage,
+    isLiveChallengePage,
     decodePanoId,
     coordinates,
     mapKey,

@@ -87,8 +87,12 @@ comparison. The verified public default is the immutable Hugging Face dataset
   projected estimate when neither row contains the other in its exact top-300.
   That estimate is labelled separately from exact neighbor-table similarity.
 
-Regular single-player rounds and private-party Live Challenge result screens
-share the same retrieval and review components.
+Regular single-player rounds and public/private-party Live Challenge result
+screens share the same completed-round pipeline: static/Modal retrieval, round
+and guess clouds, adaptive recommendation, hover and Shift previews, the visual
+comparison board, saved controls/colors, outcome receipt, and diagnostics. A
+Live Challenge-specific adapter supplies identity and result state only; it
+does not maintain a reduced review UI.
 
 ## Development
 
