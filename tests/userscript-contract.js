@@ -26,5 +26,17 @@ assert.match(source, /const useSimilarityReview = Boolean\(cloudPanoId\) && \(cl
   "a known Lodestar pano must work without a Modal credential");
 assert.match(source, /if \(knownMap\) return criticalRequest/,
   "legacy known-map data remains a fallback when a pano is outside Lodestar");
+assert.match(source, /GM_registerMenuCommand\("Copy trainer diagnostics"/,
+  "diagnostics are discoverable even when the post-round UI cannot render");
+assert.match(source, /id="omt-copy-diagnostics"/,
+  "an offline round exposes a one-click diagnostic report");
+assert.match(source, /if \(state\.review && state\.overlays\.length === 0/,
+  "late-mounted result maps render without requiring the drawer to be open");
+const diagnosticBody = source.slice(
+  source.indexOf("function trainerDiagnostics()"),
+  source.indexOf("async function writeClipboard"),
+);
+assert.doesNotMatch(diagnosticBody, /TOKEN_KEY|cradioClient\.token\(/,
+  "the copied diagnostics must not serialize the private Modal token");
 
 process.stdout.write("userscript architecture contract passed\n");

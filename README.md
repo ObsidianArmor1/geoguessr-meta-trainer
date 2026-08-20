@@ -22,17 +22,16 @@ View panoramas represented by C-RADIOv4-H.
 
 For a panorama already in Lodestar, the userscript performs no inference. It:
 
-1. routes the panorama ID through a compressed 23 MB directory;
-2. downloads one roughly 0.5 MB static neighbor chunk;
+1. resolves the panorama through one small compressed hash-bucket index;
+2. requests its self-contained roughly 8 KB row with an HTTP byte range;
 3. reads that panorama's precomputed global top-300 visual matches; and
 4. renders the cloud, strong core, suggested click, previews, and comparison
    board locally.
 
-Directory, chunk, heading, and projection assets are cached in IndexedDB. The
-public static pack is hosted in
-[`ObsidianArmor1/lodestar-neighbors`](https://github.com/ObsidianArmor1/lodestar-neighbors).
-It is independent of the GeoGuessr map: any map containing a known panorama can
-use the same row.
+Hash indexes and geographic assets are cached in IndexedDB; recently decoded
+rows are retained in bounded memory. Pack V1 remains a conservative automatic
+fallback. The pack is independent of the GeoGuessr map: any map containing a
+known panorama can use the same row.
 
 For a panorama outside Lodestar, the static lookup returns no row. If the user
 has configured the private Modal credential, the script sends the panorama ID,
@@ -44,6 +43,24 @@ Use Tampermonkey's **Configure C-RADIO cloud** command to set, replace, clear,
 or inspect the joined `wk-….ws-…` proxy token. The credential stays in
 Tampermonkey storage and is sent only in the request's authorization header.
 Known Lodestar rows never consume Modal inference.
+
+## Reliability and diagnostics
+
+Tampermonkey's **Copy trainer diagnostics** command produces a non-sensitive
+JSON report containing:
+
+- userscript, browser, and capability versions;
+- GeoGuessr event-framework and map-capture status;
+- whether the panorama was present in Lodestar;
+- Pack V2 manifest, IndexedDB, byte-range, and decode outcomes;
+- Modal status without its credential;
+- requested/decoded match counts, timing, and rendering-layer counts.
+
+The same action appears beside any post-round error. **Retry** deliberately
+retries a failed completed round; routine rerenders still never retry paid
+Modal inference. If retrieval succeeded but the result map mounted late, the
+trainer now paints automatically on that map's first idle event. The
+Tampermonkey menu's **Retry current trainer round** can also request a redraw.
 
 ### Pack V2 migration
 

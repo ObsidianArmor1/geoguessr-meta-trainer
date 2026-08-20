@@ -26,6 +26,48 @@
   const rowCache = new Map();
   const geoTileCache = new Map();
   let occupancyPromise = null;
+  const runtime = {
+    configured: true,
+    manifest: "idle",
+    manifestError: null,
+    cache: { hits: 0, misses: 0, readErrors: 0, writeErrors: 0, memoryHits: 0 },
+    network: {
+      requests: 0, rangeRequests: 0, failures: 0, bytes: 0,
+      lastStatus: null, lastRangeStatus: null, lastDurationMs: null, lastError: null,
+    },
+    lastQuery: null,
+  };
+
+  function errorText(error) {
+    return String(error?.message || error || "unknown error").slice(0, 240);
+  }
+
+  function resetRuntime() {
+    runtime.configured = available();
+    runtime.manifest = "idle";
+    runtime.manifestError = null;
+    runtime.cache = { hits: 0, misses: 0, readErrors: 0, writeErrors: 0, memoryHits: 0 };
+    runtime.network = {
+      requests: 0, rangeRequests: 0, failures: 0, bytes: 0,
+      lastStatus: null, lastRangeStatus: null, lastDurationMs: null, lastError: null,
+    };
+    runtime.lastQuery = null;
+  }
+
+  function diagnostics() {
+    return {
+      packVersion: 2,
+      configured: available(),
+      baseHost: (() => {
+        try { return new URL(baseUrl()).host; } catch (_error) { return "custom"; }
+      })(),
+      manifest: runtime.manifest,
+      manifestError: runtime.manifestError,
+      cache: { ...runtime.cache },
+      network: { ...runtime.network },
+      lastQuery: runtime.lastQuery ? { ...runtime.lastQuery } : null,
+    };
+  }
 
   function configure(options) {
     settings = options === undefined
@@ -36,6 +78,7 @@
     rowCache.clear();
     geoTileCache.clear();
     occupancyPromise = null;
+    resetRuntime();
   }
 
   function available() {
@@ -50,39 +93,57 @@
     return `${baseUrl()}/${String(path).replace(/^\//, "")}`;
   }
 
-  function transport(url, options = {}) {
-    if (settings && typeof settings.transport === "function") {
-      return settings.transport(url, options);
-    }
-    if (typeof GM_xmlhttpRequest === "function") {
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: "GET",
-          url,
-          headers: options.range
-            ? { Range: `bytes=${options.range.start}-${options.range.end}` }
-            : undefined,
-          responseType: "arraybuffer",
-          timeout: 60000,
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              resolve({ buffer: response.response, status: response.status });
-            } else {
-              reject(new Error(`${url} -> HTTP ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error(`${url} -> network error`)),
-          ontimeout: () => reject(new Error(`${url} -> timeout`)),
+  async function transport(url, options = {}) {
+    const started = Date.now();
+    const ranged = Boolean(options.range);
+    runtime.network.requests += 1;
+    if (ranged) runtime.network.rangeRequests += 1;
+    try {
+      let result;
+      if (settings && typeof settings.transport === "function") {
+        result = await settings.transport(url, options);
+      } else if (typeof GM_xmlhttpRequest === "function") {
+        result = await new Promise((resolve, reject) => {
+          GM_xmlhttpRequest({
+            method: "GET",
+            url,
+            headers: ranged
+              ? { Range: `bytes=${options.range.start}-${options.range.end}` }
+              : undefined,
+            responseType: "arraybuffer",
+            timeout: 60000,
+            onload: (response) => {
+              if (response.status >= 200 && response.status < 300) {
+                resolve({ buffer: response.response, status: response.status });
+              } else {
+                reject(new Error(`${url} -> HTTP ${response.status}`));
+              }
+            },
+            onerror: () => reject(new Error(`${url} -> network error`)),
+            ontimeout: () => reject(new Error(`${url} -> timeout`)),
+          });
         });
-      });
+      } else {
+        const headers = ranged
+          ? { Range: `bytes=${options.range.start}-${options.range.end}` }
+          : undefined;
+        const response = await fetch(url, { headers });
+        if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
+        result = { buffer: await response.arrayBuffer(), status: response.status };
+      }
+      const bytes = Number(result?.buffer?.byteLength) || 0;
+      runtime.network.bytes += bytes;
+      runtime.network.lastStatus = Number(result?.status) || null;
+      if (ranged) runtime.network.lastRangeStatus = Number(result?.status) || null;
+      runtime.network.lastDurationMs = Date.now() - started;
+      runtime.network.lastError = null;
+      return result;
+    } catch (error) {
+      runtime.network.failures += 1;
+      runtime.network.lastDurationMs = Date.now() - started;
+      runtime.network.lastError = errorText(error);
+      throw error;
     }
-    const headers = options.range
-      ? { Range: `bytes=${options.range.start}-${options.range.end}` }
-      : undefined;
-    return fetch(url, { headers }).then(async (response) => {
-      if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
-      return { buffer: await response.arrayBuffer(), status: response.status };
-    });
   }
 
   function withStore(mode, work) {
@@ -104,12 +165,22 @@
   async function cached(key, produce) {
     try {
       const stored = await withStore("readonly", (store) => store.get(key));
-      if (stored) return stored;
-    } catch (error) { /* refetching is a safe fallback */ }
+      if (stored) {
+        runtime.cache.hits += 1;
+        return stored;
+      }
+    } catch (error) {
+      runtime.cache.readErrors += 1;
+      /* refetching is a safe fallback */
+    }
+    runtime.cache.misses += 1;
     const fresh = await produce();
     try {
       await withStore("readwrite", (store) => store.put(fresh, key));
-    } catch (error) { /* cache failure is not a lookup failure */ }
+    } catch (error) {
+      runtime.cache.writeErrors += 1;
+      /* cache failure is not a lookup failure */
+    }
     return fresh;
   }
 
@@ -124,6 +195,7 @@
   function manifest() {
     if (!available()) return Promise.reject(new Error("Pack V2 is not configured"));
     if (!manifestPromise) {
+      runtime.manifest = "loading";
       const url = settings.manifestUrl || resolveUrl("manifest.json");
       manifestPromise = (settings.manifest
         ? Promise.resolve(settings.manifest)
@@ -132,7 +204,16 @@
           if (value.format !== "lodestar-range-row-pack" || value.version !== 2) {
             throw new Error("Unsupported Lodestar Pack V2 manifest");
           }
+          runtime.manifest = "ready";
+          runtime.manifestError = null;
           return value;
+        }).catch((error) => {
+          // A transient CDN or browser failure must not poison every later
+          // round in this tab with the same permanently rejected promise.
+          manifestPromise = null;
+          runtime.manifest = "failed";
+          runtime.manifestError = errorText(error);
+          throw error;
         });
     }
     return manifestPromise;
@@ -198,6 +279,7 @@
 
   async function indexFor(bucket, info) {
     if (indexCache.has(bucket)) {
+      runtime.cache.memoryHits += 1;
       const hit = indexCache.get(bucket);
       indexCache.delete(bucket);
       indexCache.set(bucket, hit);
@@ -297,7 +379,10 @@
 
   async function rowFor(descriptor) {
     const key = descriptor.panoId;
-    if (rowCache.has(key)) return rowCache.get(key);
+    if (rowCache.has(key)) {
+      runtime.cache.memoryHits += 1;
+      return rowCache.get(key);
+    }
     const path = pathFromPattern(
       descriptor.info.rowPattern, descriptor.bucket, descriptor.info.bucketHexWidth);
     const start = descriptor.dataOffset;
@@ -357,36 +442,61 @@
 
   async function query(panoId, count) {
     const started = Date.now();
-    const descriptor = await locate(panoId);
-    if (!descriptor) return null;
-    const parsed = await rowFor(descriptor);
-    const wanted = Math.max(1, Math.min(Number(count) || parsed.matches.length, parsed.matches.length));
-    const matches = parsed.matches.slice(0, wanted);
-    const similarities = matches.map((match) => match.similarity);
-    const steering = adaptiveCount(similarities);
-    return {
-      status: "complete",
-      panoId: String(panoId),
-      heading: parsed.heading,
-      latitude: parsed.latitude,
-      longitude: parsed.longitude,
-      cacheHit: false,
-      source: "lodestar-static-pack-v2",
-      corpus: descriptor.info.corpus,
-      corpusSize: descriptor.info.corpusRows,
-      neighborsPerPanorama: parsed.matches.length,
-      boundary: {
-        detected: true,
-        count: matches.length,
-        score: similarities[0] - similarities[similarities.length - 1],
-        rule: "full cloud",
-      },
-      clickCount: steering.count,
-      clickRule: steering.rule,
-      recommendedClick: sphericalClick(matches, steering.count),
-      matches,
-      timings: { totalSeconds: (Date.now() - started) / 1000 },
+    const networkBefore = runtime.network.requests;
+    runtime.lastQuery = {
+      panoId: String(panoId), requestedMatches: Number(count) || null,
+      status: "loading", found: null, decodedMatches: 0, cacheHit: null,
+      durationMs: null, error: null,
     };
+    try {
+      const descriptor = await locate(panoId);
+      if (!descriptor) {
+        Object.assign(runtime.lastQuery, {
+          status: "not-in-corpus", found: false, cacheHit: runtime.network.requests === networkBefore,
+          durationMs: Date.now() - started,
+        });
+        return null;
+      }
+      const parsed = await rowFor(descriptor);
+      const wanted = Math.max(1, Math.min(Number(count) || parsed.matches.length, parsed.matches.length));
+      const matches = parsed.matches.slice(0, wanted);
+      const similarities = matches.map((match) => match.similarity);
+      const steering = adaptiveCount(similarities);
+      const cacheHit = runtime.network.requests === networkBefore;
+      Object.assign(runtime.lastQuery, {
+        status: "complete", found: true, decodedMatches: matches.length, cacheHit,
+        durationMs: Date.now() - started, corpus: descriptor.info.corpus,
+      });
+      return {
+        status: "complete",
+        panoId: String(panoId),
+        heading: parsed.heading,
+        latitude: parsed.latitude,
+        longitude: parsed.longitude,
+        cacheHit,
+        source: "lodestar-static-pack-v2",
+        corpus: descriptor.info.corpus,
+        corpusSize: descriptor.info.corpusRows,
+        neighborsPerPanorama: parsed.matches.length,
+        boundary: {
+          detected: true,
+          count: matches.length,
+          score: similarities[0] - similarities[similarities.length - 1],
+          rule: "full cloud",
+        },
+        clickCount: steering.count,
+        clickRule: steering.rule,
+        recommendedClick: sphericalClick(matches, steering.count),
+        matches,
+        timings: { totalSeconds: (Date.now() - started) / 1000 },
+      };
+    } catch (error) {
+      Object.assign(runtime.lastQuery, {
+        status: "failed", found: null, cacheHit: runtime.network.requests === networkBefore,
+        durationMs: Date.now() - started, error: errorText(error),
+      });
+      throw error;
+    }
   }
 
   async function projectedVector(panoId) {
@@ -505,6 +615,6 @@
     configure, available, manifest, locate, query, projectedVector, similarityBetween,
     nearest, haversineKm,
     encodePanoramaId, decodePanoramaId, bucketOf, parseIndex, parseRow,
-    adaptiveCount, sphericalClick, half,
+    adaptiveCount, sphericalClick, half, diagnostics,
   };
 })(typeof window !== "undefined" ? window : globalThis);

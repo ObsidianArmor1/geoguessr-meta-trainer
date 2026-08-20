@@ -317,6 +317,40 @@
       this.timeoutMs = options.timeoutMs || REQUEST_TIMEOUT_MS;
       this.inflight = new Map();
       this.results = new Map();
+      this.lastDiagnostic = {
+        phase: "idle", panoId: null, source: null, ok: null, cached: null,
+        cacheLayer: null, reason: null, status: null, durationMs: null, packError: null,
+      };
+    }
+
+    noteDiagnostic(values) {
+      this.lastDiagnostic = { ...this.lastDiagnostic, ...values, updatedAt: Date.now() };
+    }
+
+    diagnostics() {
+      return {
+        ...this.lastDiagnostic,
+        configured: this.configured(),
+        invalidStoredCredential: this.tokenStatus().invalidStoredValue,
+        memoryEntries: this.results.size,
+        inflight: this.inflight.size,
+        persistentEntries: Object.keys(this.readCache().entries).length,
+      };
+    }
+
+    // Failures remain deduplicated by default so a rerender cannot accidentally
+    // consume another paid inference. A deliberate UI retry calls this method
+    // first; successful persistent cache entries are preserved unless the
+    // caller explicitly asks to remove one.
+    forget(panoId, options = {}) {
+      const id = String(panoId || "");
+      if (!id) return;
+      this.results.delete(id);
+      if (options.persistent === true) {
+        const cache = this.readCache();
+        delete cache.entries[id];
+        this.writeCache(cache);
+      }
     }
 
     token() {
@@ -364,26 +398,59 @@
 
     async prefetch(panoId, context = {}) {
       const id = String(panoId || "");
-      if (!id) return { ok: false, reason: "missing-pano" };
+      if (!id) {
+        this.noteDiagnostic({ phase: "complete", panoId: null, ok: false, reason: "missing-pano" });
+        return { ok: false, reason: "missing-pano" };
+      }
       // The credential check moved into resolve(). The static pack needs no
       // token: a panorama already in the corpus is answered from precomputed
       // neighbours, so playing a Lodestar map requires no account at all.
-      if (this.results.has(id)) return this.results.get(id);
+      if (this.results.has(id)) {
+        const result = this.results.get(id);
+        this.noteDiagnostic({
+          phase: "complete", panoId: id, source: result?.source || this.lastDiagnostic.source,
+          cacheLayer: "memory", ok: result?.ok === true, cached: true,
+          reason: result?.reason || null, status: result?.status || null,
+        });
+        return result;
+      }
       const cache = this.readCache();
       const cached = cache.entries[id];
       if (cached?.response) {
         try {
-          const result = { ok: true, cached: true, response: adaptResponse(cached.response, { ...context, panoId: id }) };
+          const result = {
+            ok: true, cached: true, source: "modal",
+            response: adaptResponse(cached.response, { ...context, panoId: id }),
+          };
           this.results.set(id, result);
+          this.noteDiagnostic({
+            phase: "complete", panoId: id, source: "modal", cacheLayer: "persistent",
+            ok: true, cached: true, reason: null, status: 200,
+          });
           return result;
         } catch (_error) {
           delete cache.entries[id];
           this.writeCache(cache);
         }
       }
-      if (this.inflight.has(id)) return this.inflight.get(id);
+      if (this.inflight.has(id)) {
+        this.noteDiagnostic({ phase: "loading", panoId: id, source: "inflight", ok: null });
+        return this.inflight.get(id);
+      }
+      this.noteDiagnostic({
+        phase: "loading", panoId: id, source: null, ok: null, cached: false,
+        cacheLayer: null, reason: null, status: null, durationMs: null, packError: null,
+      });
+      const started = Date.now();
       const pending = this.resolve(id, context).then((result) => {
         this.results.set(id, result);
+        this.noteDiagnostic({
+          phase: "complete", panoId: id, ok: result?.ok === true,
+          source: result?.source || this.lastDiagnostic.source,
+          cached: result?.cached === true, reason: result?.reason || null,
+          status: result?.status || (result?.ok ? 200 : null),
+          durationMs: Date.now() - started,
+        });
         if (this.results.size > 128) this.results.delete(this.results.keys().next().value);
         return result;
       }).finally(() => {
@@ -399,7 +466,10 @@
     async resolve(panoId, context) {
       const local = await this.fromPack(panoId, context);
       if (local) return local;
-      if (!this.configured()) return { ok: false, reason: "missing-credential" };
+      if (!this.configured()) {
+        this.noteDiagnostic({ source: "none", ok: false, reason: "missing-credential" });
+        return { ok: false, reason: "missing-credential" };
+      }
       return this.fetch(panoId, context);
     }
 
@@ -618,17 +688,25 @@
       if (!pack || this.packDisabled) return null;
       try {
         const raw = await pack.query(panoId, 300);
-        if (!raw) return null;               // outside the corpus: let Modal try
+        if (!raw) {
+          this.noteDiagnostic({ source: "lodestar-not-found", packError: null });
+          return null;                       // outside the corpus: let Modal try
+        }
+        this.noteDiagnostic({
+          source: raw.source || "lodestar-static-pack", ok: true,
+          cached: raw.cacheHit === true, packError: null,
+        });
         return {
           ok: true,
-          cached: false,
-          source: "lodestar-static-pack",
+          cached: raw.cacheHit === true,
+          source: raw.source || "lodestar-static-pack",
           response: adaptResponse(raw, { ...context, panoId: String(panoId) }),
         };
       } catch (error) {
         // A pack failure must never end a round: fall through to Modal and say
         // why in the console rather than surfacing "similarity unavailable".
         console.warn("[cradio] static pack unavailable, using Modal:", error && error.message);
+        this.noteDiagnostic({ source: "lodestar-failed", packError: String(error?.message || error).slice(0, 240) });
         return null;
       }
     }
@@ -655,28 +733,30 @@
         // wrong endpoint, an expired token and a cold-start timeout look
         // identical. Carry the status and a short body excerpt.
         const detail = typeof response.body === "string" ? response.body.slice(0, 160) : "";
+        this.noteDiagnostic({ source: "modal", status: response.status, cached: false });
         if (response.status === 401 || response.status === 403) {
           console.warn("[cradio] unauthorized", response.status, this.endpoint, detail);
-          return { ok: false, reason: "unauthorized", status: response.status, detail };
+          return { ok: false, source: "modal", reason: "unauthorized", status: response.status, detail };
         }
         if (response.status === 429) {
           console.warn("[cradio] rate-limited", detail);
-          return { ok: false, reason: "rate-limited", status: 429, detail };
+          return { ok: false, source: "modal", reason: "rate-limited", status: 429, detail };
         }
         if (response.status < 200 || response.status >= 300) {
           console.warn("[cradio] http-error", response.status, this.endpoint, detail);
-          return { ok: false, reason: "http-error", status: response.status, detail };
+          return { ok: false, source: "modal", reason: "http-error", status: response.status, detail };
         }
         const raw = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
         const adapted = adaptResponse(raw, { ...context, panoId });
         const cache = this.readCache();
         cache.entries[panoId] = { storedAt: Date.now(), response: raw };
         this.writeCache(cache);
-        return { ok: true, cached: false, response: adapted };
+        return { ok: true, cached: false, source: "modal", response: adapted };
       } catch (error) {
         console.warn("[cradio] request failed", this.endpoint, error && error.message);
         const reason = error?.code === "timeout" ? "timeout" : "network-error";
-        return { ok: false, reason };
+        this.noteDiagnostic({ source: "modal", ok: false, reason, status: null });
+        return { ok: false, source: "modal", reason };
       }
     }
 
