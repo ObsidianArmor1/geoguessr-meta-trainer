@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.39
+// @version      2.2.0-beta.40
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -879,6 +879,8 @@
     .omt-board-body { min-height:0; flex:1; padding:10px; }
     .omt-board-current,.omt-board-match { position:relative; min-width:0; min-height:0; overflow:hidden; border:1px solid #ffffff20; border-radius:5px; background:#020402; }
     .omt-board-current img,.omt-board-match img { width:100%; height:100%; display:block; object-fit:contain; }
+    .omt-peek-quad { position:absolute; inset:0; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:2px; }
+    .omt-peek-quad img { width:100%; height:100%; object-fit:cover; }
     .omt-board-quad { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:1px; width:100%; height:100%; }
     .omt-board-quad img { width:100%; height:100%; object-fit:cover; }
     .omt-board-current strong,.omt-board-match span { position:absolute; left:0; top:0; padding:6px 9px; color:#fff; background:#07100be8; font-size:12px; }
@@ -1072,6 +1074,9 @@
     .omt-match-tooltip-head span { color:var(--muted); text-align:right; }
     .omt-match-tooltip-images { position:relative; display:grid; grid-template-columns:1fr 1fr; height:336px; background:#090a0c; }
     .omt-match-tooltip-images img { display:block; width:100%; height:168px; object-fit:cover; }
+    /* one direction fills the frame instead of leaving three empty cells */
+    .omt-match-tooltip-images.omt-single { grid-template-columns:1fr; height:250px; }
+    .omt-match-tooltip-images.omt-single img { height:250px; }
     .omt-match-tooltip-native { position:absolute; inset:0; z-index:2; display:none; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:2px; pointer-events:none; }
     .omt-match-tooltip-native .omt-native-pano { position:relative; inset:auto; min-width:0; min-height:0; }
     .omt-match-tooltip-loading { height:100%; display:grid; place-items:center; grid-column:1 / -1; color:var(--muted); font-size:10px; }
@@ -2117,7 +2122,32 @@
       peek.className = "omt-board-peek";
       peek.innerHTML = `<div class="omt-board-peek-media"><img alt="${esc(tile.dataset.boardLabel || "Enlarged comparison view")}"><div class="omt-native-pano" aria-label="High-resolution Street View"></div></div><div class="omt-board-peek-caption"><b>${esc(tile.dataset.boardLabel || "Comparison view")}</b><span>${esc(tile.dataset.boardDetail || "")}</span></div>`;
       element.appendChild(peek);
+      // A tile showing four directions must enlarge to four directions. The
+      // peek used to take the tile's first image and mount a Street View widget
+      // over it, and a widget shows one direction by construction - so with the
+      // four-direction setting on, shift showed a single view.
+      const sources = [...tile.querySelectorAll("img")];
       const image = peek.querySelector("img");
+      if (sources.length > 1) {
+        const media = peek.querySelector(".omt-board-peek-media");
+        image.remove();
+        peek.querySelector(".omt-native-pano")?.remove();
+        const quad = document.createElement("div");
+        quad.className = "omt-peek-quad";
+        media.prepend(quad);
+        sources.forEach(async (source, slot) => {
+          const element = document.createElement("img");
+          element.alt = `${tile.dataset.boardLabel || "Comparison view"}, direction ${slot + 1}`;
+          quad.appendChild(element);
+          const src = source.currentSrc || source.src
+            || (source.dataset.src ? await imageUrl(source.dataset.src) : "");
+          if (src && peek.isConnected) {
+            // ask for the larger frame the peek can actually show
+            element.src = fitViewToBox(src, quad.clientWidth / 2, quad.clientHeight / 2);
+          }
+        });
+        return;
+      }
       if (source.currentSrc || source.src) {
         image.src = source.currentSrc || source.src;
       } else if (source.dataset.src) {
@@ -2449,7 +2479,9 @@
         : point.family
           ? (point.familyLabel || "Meta location")
           : `${point.comparisonSide === "both" ? "Shared" : point.comparisonSide === "guess" ? "Guess-side" : "Round"} visual match ${point.rank}`;
-      tooltip.querySelector(".omt-match-tooltip-images").innerHTML = urls.map((url, slot) => `<img src="${esc(url)}" alt="${esc(imageLabel)}, direction ${slot + 1}">`).join("");
+      const gallery = tooltip.querySelector(".omt-match-tooltip-images");
+      gallery.classList.toggle("omt-single", urls.length === 1);
+      gallery.innerHTML = urls.map((url, slot) => `<img src="${esc(url)}" alt="${esc(imageLabel)}, direction ${slot + 1}">`).join("");
     } catch (_error) {
       if (token === state.matchTooltipToken && tooltip.isConnected) {
         tooltip.querySelector(".omt-match-tooltip-loading").textContent = "Preview unavailable";
