@@ -17,6 +17,10 @@ assert.equal(runtimeVersion, pkg.version, "runtime version follows package.json"
 assert.match(source, /@require\s+.*\/lodestar-pack\.js/);
 assert.match(source, /@require\s+.*\/lodestar-pack-v2\.js/);
 assert.match(source, /@require\s+.*\/cradio-client\.js/);
+assert.match(source, /^\/\/ @connect\s+hf\.co$/m,
+  "Tampermonkey authorizes Hugging Face's redirected CDN subdomains");
+assert.doesNotMatch(source, /^\/\/ @connect\s+\*\.hf\.co$/m,
+  "do not use the unreliable wildcard form for Tampermonkey @connect");
 assert.doesNotMatch(source, /@require\s+.*onnxruntime-web/,
   "the rejected browser-inference runtime must not return to page startup");
 assert.doesNotMatch(source, /@require\s+.*universal-similarity\.js/,
