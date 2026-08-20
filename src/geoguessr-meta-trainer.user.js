@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.40
+// @version      2.2.0-beta.41
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -119,8 +119,11 @@
     // Each board tile as the road-aligned view only, or as all four directions
     // the corpus was embedded from.
     boardAllDirections: false,
-    // The same choice for the preview that appears when hovering a dot.
+    // The same choice for the preview that appears when hovering a dot...
     dotPreviewAllDirections: true,
+    // ...and independently for what shift enlarges it to, so a compact hover
+    // can open into the whole panorama.
+    dotShiftAllDirections: true,
   };
   const MATCH_COUNT_MIN = 20;
   const MATCH_COUNT_MAX = 300;
@@ -214,6 +217,7 @@
     boardGrid: mapColorPreferences.boardGrid,
     boardAllDirections: mapColorPreferences.boardAllDirections,
     dotPreviewAllDirections: mapColorPreferences.dotPreviewAllDirections,
+    dotShiftAllDirections: mapColorPreferences.dotShiftAllDirections,
     settingsOpen: false,
     neighborClickColor: mapColorPreferences.neighborClick,
     guessDotColor: mapColorPreferences.guessDots,
@@ -313,6 +317,7 @@
         boardGrid: Number(stored?.boardGrid) === 4 ? 4 : 3,
         boardAllDirections: stored?.boardAllDirections === true,
         dotPreviewAllDirections: stored?.dotPreviewAllDirections !== false,
+        dotShiftAllDirections: stored?.dotShiftAllDirections !== false,
       };
     } catch (_error) {
       return { ...DEFAULT_MAP_COLORS };
@@ -352,6 +357,7 @@
       boardGrid: state.boardGrid,
       boardAllDirections: state.boardAllDirections,
       dotPreviewAllDirections: state.dotPreviewAllDirections,
+      dotShiftAllDirections: state.dotShiftAllDirections,
     }));
   }
 
@@ -781,6 +787,9 @@
         case "omt-set-dot-quad":
           state.dotPreviewAllDirections = target.checked;
           break;
+        case "omt-set-dot-shift-quad":
+          state.dotShiftAllDirections = target.checked;
+          break;
         case "omt-dot-color":
         case "omt-dock-dot-color":
           return setMapColor("dots", target.value);
@@ -1078,6 +1087,7 @@
     .omt-match-tooltip-images.omt-single { grid-template-columns:1fr; height:250px; }
     .omt-match-tooltip-images.omt-single img { height:250px; }
     .omt-match-tooltip-native { position:absolute; inset:0; z-index:2; display:none; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:2px; pointer-events:none; }
+    .omt-match-tooltip-native.omt-single { grid-template-columns:1fr; grid-template-rows:1fr; }
     .omt-match-tooltip-native .omt-native-pano { position:relative; inset:auto; min-width:0; min-height:0; }
     .omt-match-tooltip-loading { height:100%; display:grid; place-items:center; grid-column:1 / -1; color:var(--muted); font-size:10px; }
     .omt-match-tooltip-foot { padding:6px 9px; border-top:1px solid var(--line); color:#c8cad0; font-size:9px; text-align:center; }
@@ -1225,6 +1235,7 @@
       + `<label class="omt-setting">Comparison grid <select id="omt-set-grid"><option value="3"${state.boardGrid === 3 ? " selected" : ""}>3 x 3</option><option value="4"${state.boardGrid === 4 ? " selected" : ""}>4 x 4</option></select></label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-board-quad" ${state.boardAllDirections ? "checked" : ""}>Comparison shows all four directions</label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-quad" ${state.dotPreviewAllDirections ? "checked" : ""}>Dot preview shows all four directions</label>`
+      + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-shift-quad" ${state.dotShiftAllDirections ? "checked" : ""}>Shift enlarges a dot to all four</label>`
       + `</div>`;
   }
 
@@ -2380,9 +2391,11 @@
         row = { p: point.panoId, h: point.headings };
       } else if (Number.isFinite(point.heading) && point.panoId) {
         // Shift-to-enlarge went through the dataset too, so it failed wherever
-        // the preview did. The four directions are the spawn heading plus the
-        // same offsets the corpus was embedded with.
-        row = { p: point.panoId, h: [0, 90, 180, 270].map((offset) => (point.heading + offset) % 360) };
+        // the preview did. The offsets are the spawn heading plus the same ones
+        // the corpus was embedded with - and how many of them is its own
+        // setting, so a one-image hover can enlarge into all four.
+        const offsets = state.dotShiftAllDirections ? [0, 90, 180, 270] : [0];
+        row = { p: point.panoId, h: offsets.map((offset) => (point.heading + offset) % 360) };
       } else {
         const datasetKey = point.datasetKey || state.review?.datasetKey;
         const map = await portableApi.loadMap(datasetKey);
@@ -2392,8 +2405,10 @@
       const host = tooltip.querySelector(".omt-match-tooltip-images");
       if (!host) return;
       const grid = document.createElement("div");
-      grid.className = "omt-match-tooltip-native";
-      for (const heading of row.h.slice(0, 4)) {
+      grid.className = state.dotShiftAllDirections
+        ? "omt-match-tooltip-native"
+        : "omt-match-tooltip-native omt-single";
+      for (const heading of row.h.slice(0, state.dotShiftAllDirections ? 4 : 1)) {
         const cell = document.createElement("div");
         cell.className = "omt-native-pano";
         cell.setAttribute("aria-label", `High-resolution Street View heading ${heading}°`);
