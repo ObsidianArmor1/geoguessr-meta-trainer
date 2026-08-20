@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.38
+// @version      2.2.0-beta.39
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -734,13 +734,15 @@
     shadow.addEventListener("click", (event) => {
       const path = event.composedPath();
       const hit = (selector) => path.find((node) => node?.matches?.(selector));
-      const summary = hit(".omt-dock-settings > summary");
-      if (summary) {
-        // take the toggle over from the browser, so the open state is ours
-        event.preventDefault();
-        const which = summary.parentElement?.id;
-        if (which === "omt-dock-settings") state.settingsOpen = !state.settingsOpen;
-        if (which === "omt-dock-colors") state.dockColorsOpen = !state.dockColorsOpen;
+      if (hit("#omt-dock-settings-toggle")) {
+        state.settingsOpen = !state.settingsOpen;
+        state.dockColorsOpen = false;
+        render();
+        return;
+      }
+      if (hit("#omt-dock-colors-toggle")) {
+        state.dockColorsOpen = !state.dockColorsOpen;
+        state.settingsOpen = false;
         render();
         return;
       }
@@ -950,7 +952,10 @@
     @keyframes omt-pulse { to { opacity:.32; } }
     .omt-dock-swatch { display:inline-block; width:9px; height:9px; margin-right:6px; border:1px solid #ffffff55; border-radius:50%; }
     .omt-dock button.active .omt-dock-swatch { box-shadow:0 0 0 2px #ffffff35; }
-    .omt-settings-panel { display:flex; flex-direction:column; grid-template-columns:none; gap:9px; min-width:250px; }
+    .omt-floating-panel { position:fixed; z-index:2147483002; top:60px; right:12px; padding:11px; border:1px solid var(--line-strong); border-radius:9px; background:#17181bf7; box-shadow:0 10px 30px #0009; }
+    .omt-settings-panel { display:flex; flex-direction:column; gap:9px; min-width:262px; }
+    .omt-colors-panel { display:grid; grid-template-columns:repeat(3,auto); gap:8px; }
+    .omt-dock button.active { color:#fff; background:#ffffff14; }
     .omt-setting { display:flex; align-items:center; justify-content:space-between; gap:10px; color:#d9dbe0; font-size:11px; font-weight:650; white-space:nowrap; }
     .omt-setting input[type=checkbox] { order:-1; margin:0 6px 0 0; }
     .omt-setting input[type=range] { width:96px; }
@@ -1192,20 +1197,38 @@
       ? `<button id="omt-guess-cycle" class="${state.showGuessNeighbors ? "active" : ""}" title="Show or hide the cloud around your guess" ${state.playerGuess ? "" : "disabled"}><i class="omt-dock-swatch" style="background:${esc(state.guessDotColor)}"></i>Guess <kbd>G</kbd></button>`
       : "";
     const display = review.visualNeighborhood
-      ? `<details class="omt-dock-settings" id="omt-dock-settings"${state.settingsOpen ? " open" : ""}><summary>Settings</summary>`
-        + `<div class="omt-dock-settings-panel omt-settings-panel">`
-        + `<label class="omt-setting"><input type="checkbox" id="omt-set-dots" ${state.showDots ? "checked" : ""}>Dots</label>`
-        + `<label class="omt-setting">Clouds <input type="range" id="omt-set-clouds" min="0" max="100" step="5" value="${Math.round(state.bandIntensity * 100)}"></label>`
-        + `<label class="omt-setting">Matches per round <input type="number" id="omt-set-matches" min="${MATCH_COUNT_MIN}" max="${MATCH_COUNT_MAX}" step="10" value="${state.matchCount}"></label>`
-        + `<label class="omt-setting">Comparison grid <select id="omt-set-grid"><option value="3"${state.boardGrid === 3 ? " selected" : ""}>3 x 3</option><option value="4"${state.boardGrid === 4 ? " selected" : ""}>4 x 4</option></select></label>`
-        + `<label class="omt-setting"><input type="checkbox" id="omt-set-board-quad" ${state.boardAllDirections ? "checked" : ""}>Comparison shows all four directions</label>`
-        + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-quad" ${state.dotPreviewAllDirections ? "checked" : ""}>Dot preview shows all four directions</label>`
-        + `</div></details>`
+      ? `<button id="omt-dock-settings-toggle" class="${state.settingsOpen ? "active" : ""}">Settings</button>`
       : "";
     const settings = review.visualNeighborhood
-      ? `<details class="omt-dock-settings" id="omt-dock-colors"${state.dockColorsOpen ? " open" : ""}><summary>Colors</summary><div class="omt-dock-settings-panel"><label class="omt-color-setting">Round <input type="color" id="omt-dock-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Guess <input type="color" id="omt-dock-guess-dot-color" value="${state.guessDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-dock-click-color" value="${state.neighborClickColor}"></label></div></details>`
+      ? `<button id="omt-dock-colors-toggle" class="${state.dockColorsOpen ? "active" : ""}">Colors</button>`
       : "";
-    return `<div class="omt-dock">${compare}${mode}${guess}${display}${settings}</div>`;
+    // The panels are siblings of the dock, not children of it. The dock has a
+    // backdrop-filter, which makes it the containing block for any fixed-
+    // position descendant, and an overflow:hidden that then clips it - so a
+    // panel inside the dock was positioned against the dock and cut away,
+    // which is why these buttons appeared to do nothing.
+    return `<div class="omt-dock">${compare}${mode}${guess}${display}${settings}</div>`
+      + (state.settingsOpen && review.visualNeighborhood ? settingsPanel() : "")
+      + (state.dockColorsOpen && review.visualNeighborhood ? colorsPanel() : "");
+  }
+
+  function settingsPanel() {
+    return `<div class="omt-floating-panel omt-settings-panel">`
+      + `<label class="omt-setting"><input type="checkbox" id="omt-set-dots" ${state.showDots ? "checked" : ""}>Dots</label>`
+      + `<label class="omt-setting">Clouds <input type="range" id="omt-set-clouds" min="0" max="100" step="5" value="${Math.round(state.bandIntensity * 100)}"></label>`
+      + `<label class="omt-setting">Matches per round <input type="number" id="omt-set-matches" min="${MATCH_COUNT_MIN}" max="${MATCH_COUNT_MAX}" step="10" value="${state.matchCount}"></label>`
+      + `<label class="omt-setting">Comparison grid <select id="omt-set-grid"><option value="3"${state.boardGrid === 3 ? " selected" : ""}>3 x 3</option><option value="4"${state.boardGrid === 4 ? " selected" : ""}>4 x 4</option></select></label>`
+      + `<label class="omt-setting"><input type="checkbox" id="omt-set-board-quad" ${state.boardAllDirections ? "checked" : ""}>Comparison shows all four directions</label>`
+      + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-quad" ${state.dotPreviewAllDirections ? "checked" : ""}>Dot preview shows all four directions</label>`
+      + `</div>`;
+  }
+
+  function colorsPanel() {
+    return `<div class="omt-floating-panel omt-colors-panel">`
+      + `<label class="omt-color-setting">Round <input type="color" id="omt-dock-dot-color" value="${state.neighborDotColor}"></label>`
+      + `<label class="omt-color-setting">Guess <input type="color" id="omt-dock-guess-dot-color" value="${state.guessDotColor}"></label>`
+      + `<label class="omt-color-setting">Click <input type="color" id="omt-dock-click-color" value="${state.neighborClickColor}"></label>`
+      + `</div>`;
   }
 
   // Kept as a hook for anything that genuinely needs rebinding after a render.
