@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.50
+// @version      2.2.0-beta.51
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.50";
+  const USERSCRIPT_VERSION = "2.2.0-beta.51";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -163,6 +163,8 @@
 
   if (typeof GM_registerMenuCommand === "function") {
     GM_registerMenuCommand("Configure C-RADIO cloud", configureCloudRadio);
+    GM_registerMenuCommand("Copy trainer diagnostics", copyTrainerDiagnostics);
+    GM_registerMenuCommand("Retry current trainer round", retryCurrentRound);
     GM_registerMenuCommand("Set matches shown per round", () => {
       const answer = window.prompt(
         `How many of the ranked matches to draw (${MATCH_COUNT_MIN}-${MATCH_COUNT_MAX})?`,
@@ -250,7 +252,121 @@
     roundIdentity: null,
     visualExposure: null,
     finalizedExposureKeys: new Set(),
+    lastRoundEventState: null,
+    diagnostics: {
+      bootedAt: Date.now(),
+      phase: "booting",
+      eventFramework: "waiting",
+      eventSource: null,
+      lastError: null,
+      errors: [],
+      round: null,
+      retrieval: null,
+      rendering: null,
+      updatedAt: Date.now(),
+    },
   };
+
+  function diagnosticError(error, phase = state.diagnostics.phase) {
+    const message = String(error?.message || error || "unknown error").slice(0, 300);
+    state.diagnostics.lastError = { phase, message, at: new Date().toISOString() };
+    state.diagnostics.errors.push(state.diagnostics.lastError);
+    if (state.diagnostics.errors.length > 8) state.diagnostics.errors.shift();
+    state.diagnostics.updatedAt = Date.now();
+  }
+
+  function diagnosticPhase(phase, values = {}) {
+    state.diagnostics.phase = phase;
+    Object.assign(state.diagnostics, values, { updatedAt: Date.now() });
+  }
+
+  function trainerDiagnostics() {
+    const pack = pageWindow.LodestarPackV2 || window.LodestarPackV2;
+    const eligibleMaps = typeof mapCandidates === "function" ? mapCandidates().length : 0;
+    const capabilities = {
+      gmXmlHttpRequest: typeof GM_xmlhttpRequest === "function",
+      indexedDB: typeof indexedDB !== "undefined",
+      decompressionStream: typeof DecompressionStream === "function",
+      googleMaps: Boolean(pageWindow.google?.maps),
+      eventFramework: Boolean(pageWindow.GeoGuessrEventFramework),
+      performanceObserver: typeof PerformanceObserver === "function",
+      canvas2d: (() => {
+        try { return Boolean(document.createElement("canvas").getContext("2d")); }
+        catch (_error) { return false; }
+      })(),
+    };
+    return {
+      report: "GeoGuessr Meta Trainer diagnostics",
+      generatedAt: new Date().toISOString(),
+      userscriptVersion: USERSCRIPT_VERSION,
+      route: `${location.origin}${location.pathname}`,
+      browser: navigator.userAgent,
+      capabilities,
+      runtime: {
+        ...state.diagnostics,
+        errors: [...state.diagnostics.errors],
+        rootMounted: Boolean(state.root?.isConnected),
+        trackedMaps: state.maps.size,
+        eligibleMaps,
+        overlays: state.overlays.length,
+      },
+      cloud: cradioClient.diagnostics?.() || {
+        configured: cradioClient.configured(),
+      },
+      packV2: pack?.diagnostics?.() || {
+        loaded: Boolean(pack),
+        diagnosticsUnavailable: true,
+      },
+    };
+  }
+
+  async function writeClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_error) {
+      try {
+        const field = document.createElement("textarea");
+        field.value = text;
+        field.style.cssText = "position:fixed;left:-9999px;top:0";
+        document.documentElement.appendChild(field);
+        field.select();
+        const copied = document.execCommand("copy");
+        field.remove();
+        return copied;
+      } catch (_fallbackError) {
+        return false;
+      }
+    }
+  }
+
+  async function copyTrainerDiagnostics() {
+    const text = JSON.stringify(trainerDiagnostics(), null, 2);
+    const copied = await writeClipboard(text);
+    if (copied) window.alert("Trainer diagnostics copied. No credential or install ID is included.");
+    else window.prompt("Copy these trainer diagnostics:", text);
+  }
+
+  function retryCurrentRound() {
+    if (state.review) {
+      clearOverlays();
+      diagnosticPhase("retrying-render");
+      applyStoredMapMode(state.requestToken);
+      return;
+    }
+    const eventState = state.lastRoundEventState;
+    const panoId = state.diagnostics.round?.panoId;
+    if (!eventState) {
+      window.alert("There is no completed round to retry yet.");
+      return;
+    }
+    if (panoId) {
+      cradioClient.forget?.(panoId);
+      modalRoundPromises.delete(String(panoId));
+    }
+    diagnosticPhase("manual-retry", { lastError: null });
+    handleRoundEnd(eventState);
+  }
 
   function readFeedback() {
     try {
@@ -736,6 +852,8 @@
       if (hit("#omt-compare-launch")) return openVisualBoard();
       if (hit("#omt-mode-cycle")) return cycleMapLayers();
       if (hit("#omt-guess-cycle")) return setGuessComparison(!state.showGuessNeighbors);
+      if (hit("#omt-copy-diagnostics")) return copyTrainerDiagnostics();
+      if (hit("#omt-retry-round")) return retryCurrentRound();
     });
 
     const onValue = (event) => {
@@ -937,6 +1055,10 @@
     .omt-dock-status { min-height:40px; display:flex; align-items:center; padding:8px 12px; color:#b7b9bf; }
     .omt-dock-status::before { content:""; width:7px; height:7px; margin-right:8px; border-radius:50%; background:#c97a64; }
     .omt-dock-status.pending::before { background:#71a7ff; animation:omt-pulse 1.1s ease-in-out infinite alternate; }
+    .omt-dock-status-actions { display:flex; align-items:stretch; border-left:1px solid var(--line); }
+    .omt-dock-status-actions button { min-height:40px; padding:8px 10px; border:0; border-left:1px solid var(--line); color:#d9dbe0; background:transparent; cursor:pointer; font-weight:650; }
+    .omt-dock-status-actions button:first-child { border-left:0; }
+    .omt-dock-status-actions button:hover { background:#ffffff12; }
     @keyframes omt-pulse { to { opacity:.32; } }
     .omt-dock-swatch { display:inline-block; width:9px; height:9px; margin-right:6px; border:1px solid #ffffff55; border-radius:50%; }
     .omt-dock button.active .omt-dock-swatch { box-shadow:0 0 0 2px #ffffff35; }
@@ -949,6 +1071,8 @@
     .omt-setting input[type=range] { width:96px; }
     .omt-setting input[type=number] { width:62px; padding:3px 5px; border:1px solid var(--line); border-radius:5px; color:#fff; background:#ffffff10; }
     .omt-setting select { padding:3px 5px; border:1px solid var(--line); border-radius:5px; color:#fff; background:#17181b; }
+    .omt-setting-action { min-height:32px; border:1px solid var(--line); border-radius:6px; color:#dfe0e3; background:#ffffff08; cursor:pointer; font-weight:650; }
+    .omt-setting-action:hover { border-color:var(--line-strong); background:#ffffff10; }
     .omt-dock-settings { position:relative; display:flex; align-items:stretch; border-left:1px solid var(--line); }
     .omt-dock-settings summary { display:flex; align-items:center; min-height:40px; padding:8px 12px; color:#d9dbe0; cursor:pointer; font-weight:650; list-style:none; }
     .omt-dock-settings summary::-webkit-details-marker { display:none; }
@@ -1223,6 +1347,7 @@
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-board-quad" ${state.boardAllDirections ? "checked" : ""}>Comparison shows all four directions</label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-quad" ${state.dotPreviewAllDirections ? "checked" : ""}>Dot preview shows all four directions</label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-shift-quad" ${state.dotShiftAllDirections ? "checked" : ""}>Shift enlarges a dot to all four</label>`
+      + `<button class="omt-setting-action" id="omt-copy-diagnostics">Copy diagnostics</button>`
       + `</div>`;
   }
 
@@ -1369,11 +1494,14 @@
 
   function renderOffline(message) {
     ensureRoot();
-    state.shadow.innerHTML = `<style>${styles}</style><div class="omt"><div class="omt-dock"><div class="omt-dock-status" title="${esc(message)}">${esc(message || "Trainer data unavailable")}</div></div></div>`;
+    diagnosticPhase("offline");
+    if (message) diagnosticError(message, "round-review");
+    state.shadow.innerHTML = `<style>${styles}</style><div class="omt"><div class="omt-dock"><div class="omt-dock-status" title="${esc(message)}">${esc(message || "Trainer data unavailable")}</div><div class="omt-dock-status-actions"><button id="omt-retry-round" title="Retry this completed round deliberately">Retry</button><button id="omt-copy-diagnostics" title="Copy a non-sensitive diagnostic report">Diagnostics</button></div></div></div>`;
   }
 
   function renderPending(message = "Analyzing visual similarity…") {
     ensureRoot();
+    diagnosticPhase("retrieving");
     state.shadow.innerHTML = `<style>${styles}</style><div class="omt"><div class="omt-dock"><div class="omt-dock-status pending">${esc(message)}</div></div></div>`;
   }
 
@@ -3486,7 +3614,19 @@
     const maps = pageWindow.google?.maps;
     // Neighbor dots do not depend on the heavier meta-detail request. In Both
     // mode, paint those immediately and add the meta layer when it is ready.
-    if (!map || !context || !maps) return;
+    if (!map || !context || !maps) {
+      state.diagnostics.rendering = {
+        status: "waiting-for-map",
+        googleMaps: Boolean(maps),
+        context: Boolean(context),
+        trackedMaps: state.maps.size,
+        eligibleMaps: mapCandidates().length,
+        overlays: state.overlays.length,
+        at: new Date().toISOString(),
+      };
+      state.diagnostics.updatedAt = Date.now();
+      return;
+    }
     clearOverlays();
     saveMapView(map);
     const bounds = new maps.LatLngBounds();
@@ -3624,6 +3764,17 @@
         : 55;
       map.fitBounds(bounds, padding);
     }
+    state.diagnostics.rendering = {
+      status: state.overlays.length ? "complete" : "empty",
+      trackedMaps: state.maps.size,
+      eligibleMaps: mapCandidates().length,
+      requestedRoundMatches: visualMatches.length,
+      requestedGuessMatches: guessMatches.length,
+      overlays: state.overlays.length,
+      fit: Boolean(fit),
+      at: new Date().toISOString(),
+    };
+    state.diagnostics.updatedAt = Date.now();
   }
 
   // Warm what the guess-side cloud will need, from a pin that may still move.
@@ -3665,8 +3816,23 @@
           this.__OMT_TRACKED = true;
           state.maps.add(this);
           this.addListener?.("idle", () => {
-            if (state.drawerOpen && state.overlays.length === 0) showMetaOnMap(false);
+            // The result map can mount after the three-second eager retry window.
+            // Drawing was previously gated on the (normally closed) drawer, so
+            // some browsers never received dots at all. Any active review with
+            // a visible layer should paint as soon as an eligible map idles.
+            if (state.review && state.overlays.length === 0
+                && (state.showVisualNeighbors || state.showGuessNeighbors)) {
+              showMetaOnMap(false);
+            }
           });
+          // Some Maps builds expose a usable MVCObject only after their final
+          // idle event. Schedule one direct draw when a newly captured map
+          // appears so correctness does not depend on another camera movement.
+          if (state.review && (state.showVisualNeighbors || state.showGuessNeighbors)) {
+            queueMicrotask(() => {
+              if (state.review && state.overlays.length === 0) showMetaOnMap(false);
+            });
+          }
           // Where the player clicks on the guess map, while they are still
           // guessing. The round-end event is the first place the guess is
           // formally known, and everything the blue cloud needs - which corpus
@@ -3709,6 +3875,11 @@
     state.round = null;
     state.playerGuess = null;
     state.roundIdentity = null;
+    state.lastRoundEventState = null;
+    state.diagnostics.round = null;
+    state.diagnostics.retrieval = null;
+    state.diagnostics.rendering = null;
+    diagnosticPhase("round-in-progress", { lastError: null });
     clearOverlays();
     restoreMapView();
     releaseImages();
@@ -3730,6 +3901,17 @@
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 125));
+    }
+    if (token === state.requestToken && state.review && state.showVisualNeighbors
+        && state.overlays.length === 0) {
+      state.diagnostics.rendering = {
+        status: "map-not-ready-after-eager-retries",
+        trackedMaps: state.maps.size,
+        eligibleMaps: mapCandidates().length,
+        overlays: 0,
+        at: new Date().toISOString(),
+      };
+      state.diagnostics.updatedAt = Date.now();
     }
   }
 
@@ -4023,6 +4205,7 @@
         state.liveChallengeLastRoundKey = liveRound.roundKey;
       } catch (error) {
         console.error("Meta Trainer: Live Challenge round lookup failed", error);
+        diagnosticError(error, "live-challenge-round-lookup");
         window.setTimeout(queueCheck, 650);
       } finally {
         lookupInFlight = false;
@@ -4060,10 +4243,12 @@
   async function handleRoundEnd(eventState) {
     clearTimeout(state.offlineRetryTimer);
     clearTimeout(state.pendingTimer);
+    const reviewStartedAt = Date.now();
     const token = ++state.requestToken;
     const rounds = eventState?.rounds || [];
     const round = rounds[rounds.length - 1];
     if (!round?.location) return;
+    state.lastRoundEventState = eventState;
     state.round = rounds.length;
     const rawGuess = round.player_guess || round.playerGuess || round.guess;
     const guessLat = Number(rawGuess?.lat ?? rawGuess?.latitude);
@@ -4093,6 +4278,29 @@
     if (Number.isFinite(roundDistanceM)) params.set("round_distance_m", roundDistanceM);
     const cloudConfigured = cradioClient.configured();
     const packAvailable = Boolean(pageWindow.LodestarPack || window.LodestarPack);
+    diagnosticPhase("round-ended", {
+      eventSource: LIVE_CHALLENGE_PATH.test(location.pathname) || PARTY_LOBBY_PATH.test(location.pathname)
+        ? "live-challenge" : "standard",
+      lastError: null,
+    });
+    state.diagnostics.round = {
+      number: rounds.length,
+      panoId: cloudPanoId || null,
+      datasetKey: datasetKey || null,
+      hasGuess: Boolean(state.playerGuess),
+      hasCoordinates: Number.isFinite(round.location.lat) && Number.isFinite(round.location.lng),
+    };
+    state.diagnostics.retrieval = {
+      status: "starting",
+      packLoaded: packAvailable,
+      modalConfigured: cloudConfigured,
+      knownMap: null,
+      source: null,
+      requestedMatches: 300,
+      decodedMatches: 0,
+      cacheHit: null,
+      durationMs: null,
+    };
     const inferredDiagonalKm = Number.isFinite(roundScore) && roundScore > 0 && roundScore < 5000
         && Number.isFinite(roundDistanceM) && roundDistanceM > 0
       ? -10 * (roundDistanceM / 1000) / Math.log(roundScore / 5000)
@@ -4100,6 +4308,7 @@
     const knownMap = datasetKey
       ? await portableApi.isKnownMap(datasetKey).catch(() => false)
       : false;
+    state.diagnostics.retrieval.knownMap = knownMap;
     const useSimilarityReview = Boolean(cloudPanoId) && (cloudConfigured || packAvailable);
     const cloudRequest = useSimilarityReview
       ? prefetchModalRound(cloudPanoId, {
@@ -4142,6 +4351,20 @@
         renderOffline("This round did not expose a Street View panorama");
         return;
       }
+      const clientDiagnostic = cradioClient.diagnostics?.() || {};
+      const decodedMatches = review.visualNeighborhood?.visualMatches?.length || 0;
+      state.diagnostics.retrieval = {
+        ...state.diagnostics.retrieval,
+        status: "complete",
+        source: clientDiagnostic.source || (review.cloud ? "cloud" : "legacy-pack"),
+        decodedMatches,
+        cacheHit: review.cradio?.cacheHit === true || clientDiagnostic.cached === true,
+        corpus: review.cradio?.corpus || null,
+        corpusSize: review.cradio?.corpusSize || null,
+        durationMs: Date.now() - reviewStartedAt,
+        failureReason: null,
+      };
+      diagnosticPhase("review-ready");
       state.review = review;
       state.roundIdentity = buildRoundIdentity(eventState, round, review);
       state.fastNeighborhood = null;
@@ -4167,6 +4390,16 @@
       clearTimeout(state.pendingTimer);
       state.pendingTimer = 0;
       if (token === state.requestToken) {
+        const clientDiagnostic = cradioClient.diagnostics?.() || {};
+        state.diagnostics.retrieval = {
+          ...state.diagnostics.retrieval,
+          status: "failed",
+          source: clientDiagnostic.source || null,
+          durationMs: Date.now() - reviewStartedAt,
+          failureReason: String(error?.message || error).slice(0, 300),
+          httpStatus: clientDiagnostic.status || null,
+          packError: clientDiagnostic.packError || null,
+        };
         // The cloud branch discarded error.message and rendered a fixed string,
         // so the reason added upstream never reached the screen.
         console.warn("Meta Trainer: cloud review failed", error);
@@ -4210,7 +4443,15 @@
     for (let attempt = 0; attempt < 500; attempt += 1) {
       const framework = pageWindow.GeoGuessrEventFramework;
       if (framework) {
-        await framework.init();
+        try {
+          await framework.init();
+        } catch (error) {
+          diagnosticPhase("event-framework-retrying", { eventFramework: "init-failed" });
+          diagnosticError(error, "event-framework-init");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          continue;
+        }
+        diagnosticPhase("event-framework-ready", { eventFramework: "ready" });
         framework.events.addEventListener("round_start", (event) => {
           clearRound();
           warmMapForRound(event.detail);
@@ -4228,6 +4469,8 @@
       }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
+    diagnosticPhase("event-framework-failed", { eventFramework: "missing" });
+    diagnosticError("GeoGuessr Event Framework did not initialize", "startup");
     console.error("Meta Trainer: GeoGuessr Event Framework did not initialize");
   }
 

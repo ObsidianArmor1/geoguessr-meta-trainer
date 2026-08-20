@@ -108,6 +108,8 @@ async function main() {
   assert.equal(first.ok, true);
   assert.equal(second.ok, true);
   assert.equal(first.cached, false);
+  assert.equal(client.diagnostics().configured, true);
+  assert.equal(client.diagnostics().ok, true);
 
   let headingBody = null;
   const headingClient = clientWith(async (options) => {
@@ -175,9 +177,15 @@ async function main() {
     error.code = "timeout";
     throw error;
   }, storage());
-  assert.deepEqual(await timeout.prefetch("pano-timeout"), { ok: false, reason: "timeout" });
+  const timedOut = await timeout.prefetch("pano-timeout");
+  assert.equal(timedOut.ok, false);
+  assert.equal(timedOut.reason, "timeout");
+  assert.equal(timedOut.source, "modal");
   const network = clientWith(async () => { throw new Error("offline"); }, storage());
-  assert.deepEqual(await network.prefetch("pano-network"), { ok: false, reason: "network-error" });
+  const networkFailed = await network.prefetch("pano-network");
+  assert.equal(networkFailed.ok, false);
+  assert.equal(networkFailed.reason, "network-error");
+  assert.equal(networkFailed.source, "modal");
 
   let failedCalls = 0;
   const failedOnce = clientWith(async () => {
@@ -189,6 +197,11 @@ async function main() {
   assert.equal(failedFirst.reason, "rate-limited");
   assert.equal(failedSecond.reason, "rate-limited");
   assert.equal(failedCalls, 1, "a failed pano is not automatically retried");
+  failedOnce.forget("pano-no-retry");
+  const deliberateRetry = await failedOnce.prefetch("pano-no-retry");
+  assert.equal(deliberateRetry.reason, "rate-limited");
+  assert.equal(failedCalls, 2, "an explicit user retry clears only the in-memory guard");
+  assert.equal(failedOnce.diagnostics().reason, "rate-limited");
 
   // The userscript's request-token guard must discard a late prior-round
   // result; this deterministic gate mirrors that contract without a DOM.

@@ -78,6 +78,13 @@ function half(bits) {
   assert.equal(result.longitude, sourceLongitude);
   assert.equal(result.heading, sourceHeading);
   assert.equal(result.matches.length, 300);
+  assert.equal(result.cacheHit, false, "the first query requires pack transport");
+  const firstDiagnostics = pack.diagnostics();
+  assert.equal(firstDiagnostics.lastQuery.status, "complete");
+  assert.equal(firstDiagnostics.lastQuery.found, true);
+  assert.equal(firstDiagnostics.lastQuery.decodedMatches, 300);
+  assert.equal(firstDiagnostics.network.lastRangeStatus, 206);
+  assert.ok(firstDiagnostics.network.requests >= 3);
   for (let rank = 0; rank < 300; rank += 1) {
     const target = chunk.readInt32LE(rank * 4);
     const expectedId = ids.subarray(target * 22, (target + 1) * 22).toString("ascii");
@@ -100,6 +107,26 @@ function half(bits) {
   const nearest = await pack.nearest(sourceLatitude, sourceLongitude, { withinKm: 1 });
   assert.equal(nearest.panoId, sourcePano);
   assert.ok(nearest.distanceKm < 0.001);
+  const repeated = await pack.query(sourcePano, 300);
+  assert.equal(repeated.cacheHit, true, "a repeated query is served without transport");
+  assert.equal(pack.diagnostics().lastQuery.cacheHit, true);
+  assert.ok(pack.diagnostics().cache.memoryHits > 0);
+
+  let manifestAttempts = 0;
+  pack.configure({
+    baseUrl: output,
+    transport: async (url) => {
+      manifestAttempts += 1;
+      if (manifestAttempts === 1) throw new Error("temporary CDN failure");
+      return { buffer: arrayBuffer(fs.readFileSync(url)), status: 200 };
+    },
+  });
+  await assert.rejects(pack.manifest(), /temporary CDN failure/);
+  assert.equal(pack.diagnostics().manifest, "failed");
+  assert.equal((await pack.manifest()).version, 2,
+    "a transient manifest failure does not poison later rounds in the tab");
+  assert.equal(pack.diagnostics().manifest, "ready");
+  assert.equal(manifestAttempts, 2);
 
   fs.rmSync(output, { recursive: true, force: true });
   process.stdout.write("Lodestar Pack V2 exact-parity test passed\n");
