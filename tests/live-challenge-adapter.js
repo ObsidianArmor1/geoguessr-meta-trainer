@@ -80,6 +80,13 @@ assert.equal(adapter.challengeIdForPage(
   [],
   { id: "tracked-game", partyLobbyPath: "/party/lobby/ROOM" },
 ), "tracked-game");
+assert.equal(adapter.isLiveChallengePage("/live-challenge/public-game"), true);
+assert.equal(adapter.isLiveChallengePage(
+  "/party/lobby/ROOM",
+  [],
+  { id: "tracked-game", partyLobbyPath: "/party/lobby/ROOM" },
+), true);
+assert.equal(adapter.isLiveChallengePage("/game/ordinary-game"), false);
 
 for (const selector of adapter.RESULT_SELECTORS) {
   assert.equal(adapter.resultMounted({
@@ -94,5 +101,23 @@ assertFixture("party");
 const party = fixture("party");
 const noProfile = adapter.normalizeRound(party.payload, "party-game", null);
 assert.equal(noProfile.playerGuess, null, "another player's guess is never used without identity");
+
+// This is the exact input contract consumed by the ordinary handleRoundEnd
+// path. Live Challenge must not grow a reduced, feature-specific review path.
+const parityRound = adapter.buildEventState(
+  adapter.normalizeRound(party.payload, "party-game", "party-player"),
+  "party-game",
+).rounds.at(-1);
+assert.ok(parityRound.eventKey);
+assert.ok(parityRound.gameId);
+assert.ok(parityRound.datasetKey);
+assert.ok(parityRound.location.panoId);
+assert.ok(Number.isFinite(parityRound.location.lat));
+assert.ok(Number.isFinite(parityRound.location.lng));
+assert.ok(Number.isFinite(parityRound.player_guess.lat));
+assert.ok(Number.isFinite(parityRound.player_guess.lng));
+assert.ok(Number.isFinite(parityRound.score.amount));
+assert.ok(Number.isFinite(parityRound.distance.meters.amount));
+assert.ok(Number.isFinite(parityRound.time));
 
 process.stdout.write("live challenge adapter fixtures passed\n");
