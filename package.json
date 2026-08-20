@@ -1,12 +1,14 @@
 {
   "name": "geoguessr-meta-trainer",
-  "version": "2.1.0-beta.7",
+  "version": "2.2.0-beta.47",
   "private": true,
   "license": "MIT",
   "scripts": {
     "check": "node --check src/universal-similarity.js && node --check src/portable-api.js && node --check src/live-challenge-adapter.js && node --check src/cradio-client.js && node --check src/geoguessr-meta-trainer.user.js",
     "test:live-challenge": "node tests/live-challenge-adapter.js",
     "test:cradio": "node tests/cradio-client.js",
-    "test:smoke": "python3 tests/neighbor-change-points.py && node tests/universal-similarity.js && node tests/live-challenge-adapter.js && node tests/cradio-client.js && node tests/portable-api-smoke.js data"
+    "test:lodestar": "node tests/lodestar-pack.js",
+    "test:userscript-contract": "node tests/userscript-contract.js",
+    "test:smoke": "python3 tests/neighbor-change-points.py && node tests/universal-similarity.js && node tests/live-challenge-adapter.js && node tests/lodestar-pack.js && node tests/cradio-client.js && node tests/userscript-contract.js && node tests/portable-api-smoke.js data"
   }
 }

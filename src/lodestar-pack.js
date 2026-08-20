@@ -198,7 +198,10 @@
     while (count < similarities.length && similarities[count] >= best - SIMILARITY_MARGIN) {
       count += 1;
     }
-    const clamped = Math.max(MIN_MATCHES, Math.min(count, similarities.length));
+    const clamped = Math.min(
+      similarities.length,
+      Math.max(MIN_MATCHES, count),
+    );
     return {
       detected: true,
       count: clamped,
