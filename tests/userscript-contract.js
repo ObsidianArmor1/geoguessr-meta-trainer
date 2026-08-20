@@ -15,6 +15,7 @@ assert.equal(metadataVersion, pkg.version, "metadata version follows package.jso
 assert.equal(runtimeVersion, pkg.version, "runtime version follows package.json");
 
 assert.match(source, /@require\s+.*\/lodestar-pack\.js/);
+assert.match(source, /@require\s+.*\/lodestar-pack-v2\.js/);
 assert.match(source, /@require\s+.*\/cradio-client\.js/);
 assert.doesNotMatch(source, /@require\s+.*onnxruntime-web/,
   "the rejected browser-inference runtime must not return to page startup");

@@ -397,7 +397,7 @@
   }
 
   // Estimated cosine similarity between any two panoramas in the corpus.
-  async function similarityBetween(panoIdA, panoIdB) {
+  async function similarityBetweenV1(panoIdA, panoIdB) {
     const dir = await directory();
     const rowA = dir.rowOf.get(String(panoIdA));
     const rowB = dir.rowOf.get(String(panoIdB));
@@ -409,11 +409,50 @@
     return total;
   }
 
-  async function query(panoId, count) {
+  async function queryV1(panoId, count) {
     const dir = await directory();
     const row = dir.rowOf.get(String(panoId));
     if (row === undefined) return null;          // not in the corpus: caller falls back
     return queryRow(row, count);
+  }
+
+  async function query(panoId, count) {
+    const v2 = root.LodestarPackV2;
+    if (v2 && v2.available && v2.available()) {
+      try {
+        const result = await v2.query(panoId, count);
+        if (result) return result;
+      } catch (error) {
+        console.warn("[lodestar] Pack V2 query failed; using V1:", error && error.message);
+      }
+    }
+    return queryV1(panoId, count);
+  }
+
+  async function nearestPreferred(latitude, longitude, options) {
+    const v2 = root.LodestarPackV2;
+    if (v2 && v2.available && v2.available() && v2.nearest) {
+      try {
+        const result = await v2.nearest(latitude, longitude, options);
+        if (result) return result;
+      } catch (error) {
+        console.warn("[lodestar] Pack V2 spatial lookup failed; using V1:", error && error.message);
+      }
+    }
+    return nearest(latitude, longitude, options);
+  }
+
+  async function similarityBetween(panoIdA, panoIdB) {
+    const v2 = root.LodestarPackV2;
+    if (v2 && v2.available && v2.available() && v2.similarityBetween) {
+      try {
+        const result = await v2.similarityBetween(panoIdA, panoIdB);
+        if (Number.isFinite(result)) return result;
+      } catch (error) {
+        console.warn("[lodestar] Pack V2 projection failed; using V1:", error && error.message);
+      }
+    }
+    return similarityBetweenV1(panoIdA, panoIdB);
   }
 
   async function queryRow(row, count) {
@@ -473,7 +512,7 @@
   }
 
   root.LodestarPack = {
-    query, queryRow, nearest, directory, headings, headingOf, boundary,
+    query, queryRow, nearest: nearestPreferred, directory, headings, headingOf, boundary,
     adaptiveCount, sphericalClick, half, haversineKm,
     projectedVector, similarityBetween,
   };

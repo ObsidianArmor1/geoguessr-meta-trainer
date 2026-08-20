@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.47
+// @version      2.2.0-beta.48
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -9,6 +9,7 @@
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js
 // @grant        GM_xmlhttpRequest
@@ -20,6 +21,8 @@
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
 // @connect      cdn.jsdelivr.net
+// @connect      huggingface.co
+// @connect      *.hf.co
 // @connect      streetviewpixels-pa.googleapis.com
 // @connect      obsidianarmor1--geoguessr-cradio-pilot-v1-pilot-query.modal.run
 // @connect      obsidianarmor1--geoguessr-cradio-lodestar-v1-pilot-query.modal.run
@@ -41,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.47";
+  const USERSCRIPT_VERSION = "2.2.0-beta.48";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -3636,8 +3639,8 @@
       try {
         const anchor = await pack.nearest(latitude, longitude, { withinKm: 100 });
         if (!anchor) return;
-        // pulls the anchor's chunk into the cache, which is the slow part
-        await pack.queryRow(anchor.row, 300);
+        // pulls the anchor's row range into the cache, which is the slow part
+        await pack.query(anchor.panoId, 300);
       } catch (_error) {
         // a warm that fails costs nothing; the real load will try again
       }
