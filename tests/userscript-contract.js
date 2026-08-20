@@ -38,5 +38,11 @@ const diagnosticBody = source.slice(
 );
 assert.doesNotMatch(diagnosticBody, /TOKEN_KEY|cradioClient\.token\(/,
   "the copied diagnostics must not serialize the private Modal token");
+assert.match(source, /className = "omt-match-tooltip-stills"/,
+  "dot previews retain a stable thumbnail layer while live Street View loads");
+assert.match(source, /host\.appendChild\(grid\);\s*for \(const \[live, heading\] of mounts\)/,
+  "all four high-resolution cells mount before expensive Street View construction begins");
+assert.doesNotMatch(source, /gallery\.innerHTML = urls\.map/,
+  "thumbnail completion must not delete an already-mounted native Street View layer");
 
 process.stdout.write("userscript architecture contract passed\n");
