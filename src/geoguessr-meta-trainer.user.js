@@ -888,10 +888,6 @@
     .omt-board-body { min-height:0; flex:1; padding:10px; }
     .omt-board-current,.omt-board-match { position:relative; min-width:0; min-height:0; overflow:hidden; border:1px solid #ffffff20; border-radius:5px; background:#020402; }
     .omt-board-current img,.omt-board-match img { width:100%; height:100%; display:block; object-fit:contain; }
-    .omt-peek-quad { position:absolute; inset:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:2px; }
-    .omt-peek-quad img { width:100%; height:100%; min-width:0; min-height:0; object-fit:cover; }
-    .omt-board-quad { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:1px; width:100%; height:100%; }
-    .omt-board-quad img { width:100%; height:100%; min-width:0; min-height:0; object-fit:cover; }
     .omt-board-current strong,.omt-board-match span { position:absolute; left:0; top:0; padding:6px 9px; color:#fff; background:#07100be8; font-size:12px; }
     .omt-board-current strong { color:#c8ff70; font-size:14px; }
     .omt-board-grid { width:100%; height:100%; min-width:0; min-height:0; display:grid; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(3,1fr); gap:6px; }
@@ -1062,6 +1058,15 @@
     .omt-board-match.omt-board-guess { border:2px solid #e6a64c; }
     .omt-board-match.omt-board-guess span { color:#ffd993; }
     .omt-board-current img,.omt-board-match img { display:block; width:100%; height:100%; object-fit:contain; }
+    /* Four-direction grids. minmax(0,1fr) rather than 1fr, because the implicit
+       minimum of 1fr is the image's intrinsic 256px - which makes the rows
+       uneven and overflows the box. These rules belong in THIS sheet: the file
+       carries an older one too, and rules added there are simply never
+       applied. */
+    .omt-board-quad { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:1px; width:100%; height:100%; }
+    .omt-board-quad img { display:block; width:100%; height:100%; min-width:0; min-height:0; object-fit:cover; }
+    .omt-peek-quad { position:absolute; inset:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:2px; }
+    .omt-peek-quad img { display:block; width:100%; height:100%; min-width:0; min-height:0; object-fit:cover; }
     .omt-board-current strong,.omt-board-match span { position:absolute; left:0; top:0; padding:4px 6px; color:#fff; background:#090a0cdd; font-size:10px; }
     .omt-board-current strong { color:#fff; font-size:11px; }
     button.omt-board-match { padding:0; cursor:pointer; }
