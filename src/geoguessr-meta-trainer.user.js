@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.45
+// @version      2.2.0-beta.46
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -1066,6 +1066,7 @@
     .omt-board-quad { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:1px; width:100%; height:100%; }
     .omt-board-quad img { display:block; width:100%; height:100%; min-width:0; min-height:0; object-fit:cover; }
     .omt-peek-quad { position:absolute; inset:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:2px; }
+    .omt-peek-cell { position:relative; min-width:0; min-height:0; overflow:hidden; background:#050607; }
     .omt-peek-quad img { display:block; width:100%; height:100%; min-width:0; min-height:0; object-fit:cover; }
     .omt-board-current strong,.omt-board-match span { position:absolute; left:0; top:0; padding:4px 6px; color:#fff; background:#090a0cdd; font-size:10px; }
     .omt-board-current strong { color:#fff; font-size:11px; }
@@ -1892,10 +1893,11 @@
   // They are parked off-screen rather than hidden, because a display:none
   // panorama stops rendering and has to repaint on return - which is the thing
   // being avoided.
-  // Room for a board's worth: nine tiles plus a couple of recently hovered map
-  // dots. Every entry is a live Street View widget rendering off-screen, so
-  // this is not free - it is bounded deliberately rather than generously.
-  const NATIVE_PANO_CACHE_LIMIT = 11;
+  // A four-direction peek mounts four widgets at once, so this holds three
+  // tiles' worth. Every entry is a live Street View widget, and browsers cap
+  // how many WebGL contexts exist at once - somewhere around sixteen - so this
+  // is bounded deliberately rather than generously.
+  const NATIVE_PANO_CACHE_LIMIT = 12;
   const nativePanoCache = new Map();
   let nativePanoAttic = null;
 
@@ -2063,15 +2065,26 @@
     const heading = Number(tile.dataset.boardHeading) || 0;
     const quad = peek.querySelector(".omt-peek-quad");
     if (quad) {
-      // Sized after the peek is in the document: read before layout, the box is
-      // zero and every direction is requested at the default thumbnail size.
+      // Four live Street View widgets, one per direction, rather than four
+      // thumbnails. The thumbnail endpoint caps around 562x280 whatever is
+      // requested, which is soft across half a screen; the widget renders the
+      // real tiles. Each cell keeps a thumbnail underneath as the thing to look
+      // at while its panorama loads, and the panorama fades in over it - the
+      // same crossfade the single-direction peek uses.
       const box = quad.getBoundingClientRect();
       for (let slot = 0; slot < 4; slot += 1) {
-        const image = document.createElement("img");
-        image.alt = `${tile.dataset.boardLabel || "Comparison view"}, direction ${slot + 1}`;
-        image.src = fitViewToBox(corpusViewUrl(panoId, heading + slot * 90),
-          box.width / 2, box.height / 2);
-        quad.appendChild(image);
+        const bearing = heading + slot * 90;
+        const cell = document.createElement("div");
+        cell.className = "omt-peek-cell";
+        const still = document.createElement("img");
+        still.alt = `${tile.dataset.boardLabel || "Comparison view"}, direction ${slot + 1}`;
+        still.src = fitViewToBox(corpusViewUrl(panoId, bearing), box.width / 2, box.height / 2);
+        const live = document.createElement("div");
+        live.className = "omt-native-pano";
+        live.setAttribute("aria-label", `High-resolution Street View, direction ${slot + 1}`);
+        cell.append(still, live);
+        quad.appendChild(cell);
+        mountNativeStreetView(live, panoId, bearing);
       }
       return;
     }
