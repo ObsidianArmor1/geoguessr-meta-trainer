@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.51
+// @version      2.2.0-beta.52
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.51";
+  const USERSCRIPT_VERSION = "2.2.0-beta.52";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -1192,19 +1192,20 @@
     .omt-match-tooltip-head { display:flex; justify-content:space-between; gap:12px; padding:7px 9px; font-size:10px; }
     .omt-match-tooltip-head b { color:var(--omt-neighbor-dot,#ff536b); font-size:11px; }
     .omt-match-tooltip-head span { color:var(--muted); text-align:right; }
-    .omt-match-tooltip-images { position:relative; display:grid; grid-template-columns:1fr 1fr; height:336px; background:#090a0c; }
-    .omt-match-tooltip-images img { display:block; width:100%; height:168px; object-fit:cover; }
+    .omt-match-tooltip-images { position:relative; height:336px; background:#090a0c; }
+    .omt-match-tooltip-stills,.omt-match-tooltip-native { position:absolute; inset:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:2px; }
+    .omt-match-tooltip-stills.omt-single,.omt-match-tooltip-native.omt-single { grid-template-columns:1fr; grid-template-rows:1fr; }
+    .omt-match-tooltip-cell { position:relative; min-width:0; min-height:0; overflow:hidden; background:#090a0c; }
+    .omt-match-tooltip-cell > img { position:absolute; inset:0; display:block; width:100%; height:100%; object-fit:cover; opacity:0; transition:opacity .12s ease-out; }
+    .omt-match-tooltip-cell > img.omt-loaded { opacity:1; }
+    .omt-match-tooltip-loading-slot { position:absolute; inset:0; display:grid; place-items:center; color:#777981; background:#090a0c; font-size:9px; }
     /* one direction fills the frame instead of leaving three empty cells */
-    .omt-match-tooltip-images.omt-single { grid-template-columns:1fr; height:250px; }
-    .omt-match-tooltip-images.omt-single img { height:250px; }
-    .omt-match-tooltip-native { position:absolute; inset:0; z-index:2; display:none; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:2px; pointer-events:none; }
-    .omt-match-tooltip-native.omt-single { grid-template-columns:1fr; grid-template-rows:1fr; }
-    .omt-match-tooltip-native .omt-native-pano { position:relative; inset:auto; min-width:0; min-height:0; }
-    .omt-match-tooltip-loading { height:100%; display:grid; place-items:center; grid-column:1 / -1; color:var(--muted); font-size:10px; }
+    .omt-match-tooltip-images.omt-single { height:250px; }
+    .omt-match-tooltip-native { z-index:2; display:none; pointer-events:none; }
+    .omt-match-tooltip-native .omt-native-pano { position:absolute; inset:0; min-width:0; min-height:0; }
     .omt-match-tooltip-foot { padding:6px 9px; border-top:1px solid var(--line); color:#c8cad0; font-size:9px; text-align:center; }
     .omt-match-tooltip.omt-match-tooltip-expanded { inset:62px 2vw 40px !important; width:auto; display:grid; grid-template-rows:auto minmax(0,1fr) auto; border-color:#ffffff4a; border-radius:5px; background:#060709fa; box-shadow:0 20px 80px #000f; backdrop-filter:none; }
-    .omt-match-tooltip-expanded .omt-match-tooltip-images { min-height:0; height:auto; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
-    .omt-match-tooltip-expanded .omt-match-tooltip-images img { min-width:0; min-height:0; height:100%; object-fit:cover; }
+    .omt-match-tooltip-expanded .omt-match-tooltip-images { min-height:0; height:auto; }
     .omt-match-tooltip-expanded .omt-match-tooltip-native { display:grid; }
     .omt-legend { position:fixed; z-index:2147482999; left:12px; bottom:96px; padding:6px 8px; border:1px solid #ffffff2c; border-radius:5px; color:#d8dade; background:#17181be8; box-shadow:0 5px 20px #0006; font-size:9px; }
     .omt-legend-dot { display:inline-block; width:8px; height:8px; margin:0 4px 0 1px; border:1px solid #fff; border-radius:50%; background:#767981; }
@@ -2523,6 +2524,52 @@
     state.matchTooltipPoint = null;
   }
 
+  function tooltipStillCell(label) {
+    const cell = document.createElement("div");
+    cell.className = "omt-match-tooltip-cell";
+    const loading = document.createElement("span");
+    loading.className = "omt-match-tooltip-loading-slot";
+    loading.textContent = label;
+    cell.appendChild(loading);
+    return cell;
+  }
+
+  function prepareTooltipStills(gallery, count) {
+    if (!gallery) return null;
+    gallery.classList.toggle("omt-single", count === 1);
+    let stills = gallery.querySelector(":scope > .omt-match-tooltip-stills");
+    if (!stills) {
+      stills = document.createElement("div");
+      stills.className = "omt-match-tooltip-stills";
+      gallery.prepend(stills);
+    }
+    stills.classList.toggle("omt-single", count === 1);
+    stills.replaceChildren(...Array.from(
+      { length: count },
+      (_, slot) => tooltipStillCell(`Loading direction ${slot + 1}…`),
+    ));
+    return stills;
+  }
+
+  function fillTooltipStills(gallery, urls, imageLabel) {
+    const stills = prepareTooltipStills(gallery, urls.length);
+    if (!stills) return;
+    [...stills.children].forEach((cell, slot) => {
+      const loading = cell.querySelector(".omt-match-tooltip-loading-slot");
+      const image = document.createElement("img");
+      image.alt = `${imageLabel}, direction ${slot + 1}`;
+      image.addEventListener("load", () => {
+        image.classList.add("omt-loaded");
+        loading?.remove();
+      }, { once: true });
+      image.addEventListener("error", () => {
+        if (loading) loading.textContent = "Preview unavailable";
+      }, { once: true });
+      cell.appendChild(image);
+      image.src = urls[slot];
+    });
+  }
+
   async function ensureMatchTooltipHighResolution(tooltip, point) {
     if (!tooltip?.isConnected || tooltip.dataset.nativeRequested === "true") return;
     tooltip.dataset.nativeRequested = "true";
@@ -2549,15 +2596,38 @@
       grid.className = state.dotShiftAllDirections
         ? "omt-match-tooltip-native"
         : "omt-match-tooltip-native omt-single";
-      for (const heading of row.h.slice(0, state.dotShiftAllDirections ? 4 : 1)) {
-        const cell = document.createElement("div");
-        cell.className = "omt-native-pano";
-        cell.setAttribute("aria-label", `High-resolution Street View heading ${heading}°`);
+      const box = host.getBoundingClientRect();
+      const headings = row.h.slice(0, state.dotShiftAllDirections ? 4 : 1);
+      const mounts = [];
+      for (const heading of headings) {
+        const cell = tooltipStillCell("Loading high resolution…");
+        const still = document.createElement("img");
+        still.alt = `Street View heading ${heading}°`;
+        still.addEventListener("load", () => {
+          still.classList.add("omt-loaded");
+          cell.querySelector(".omt-match-tooltip-loading-slot")?.remove();
+        }, { once: true });
+        still.src = fitViewToBox(
+          corpusViewUrl(row.p, heading),
+          box.width / (headings.length === 1 ? 1 : 2),
+          box.height / (headings.length === 1 ? 1 : 2),
+        );
+        const live = document.createElement("div");
+        live.className = "omt-native-pano";
+        live.setAttribute("aria-label", `High-resolution Street View heading ${heading}°`);
+        cell.append(still, live);
         grid.appendChild(cell);
-        const panorama = mountNativeStreetView(cell, row.p, heading);
+        mounts.push([live, heading]);
+      }
+      // Put every correctly sized thumbnail cell on screen before constructing
+      // the first live panorama. StreetViewPanorama creation is synchronous and
+      // expensive enough that doing it inside the construction loop left only
+      // the first quadrant present for several frames.
+      host.appendChild(grid);
+      for (const [live, heading] of mounts) {
+        const panorama = mountNativeStreetView(live, row.p, heading);
         if (panorama) state.matchTooltipNative.push(panorama);
       }
-      host.appendChild(grid);
     } catch (_error) {
       // The ordinary thumbnail grid remains visible if native Street View is
       // unavailable for an unofficial panorama or transient Maps API state.
@@ -2610,11 +2680,17 @@
     const footer = point.current
       ? "Hovering GeoGuessr's icon · hold Shift to enlarge · click to open this panorama ↗"
       : "Hold Shift to enlarge · click the dot to open this panorama in Google Maps ↗";
-    tooltip.innerHTML = `<div class="omt-match-tooltip-head">${heading}</div><div class="omt-match-tooltip-images"><div class="omt-match-tooltip-loading">Loading four directions…</div></div><div class="omt-match-tooltip-foot">${footer}</div>`;
+    tooltip.innerHTML = `<div class="omt-match-tooltip-head">${heading}</div><div class="omt-match-tooltip-images"></div><div class="omt-match-tooltip-foot">${footer}</div>`;
     positionMatchTooltip(tooltip, clientX, clientY);
     state.shadow.appendChild(tooltip);
     state.matchTooltip = tooltip;
     state.matchTooltipPoint = point;
+    const initialDirections = state.dotPreviewAllDirections
+      || (state.matchTooltipShift && state.dotShiftAllDirections) ? 4 : 1;
+    prepareTooltipStills(
+      tooltip.querySelector(".omt-match-tooltip-images"),
+      initialDirections,
+    );
     if (state.matchTooltipShift) ensureMatchTooltipHighResolution(tooltip, point);
     try {
       // /api/view is served by a map dataset. The corpus path has none, so
@@ -2636,11 +2712,12 @@
           ? (point.familyLabel || "Meta location")
           : `${point.comparisonSide === "both" ? "Shared" : point.comparisonSide === "guess" ? "Guess-side" : "Round"} visual match ${point.rank}`;
       const gallery = tooltip.querySelector(".omt-match-tooltip-images");
-      gallery.classList.toggle("omt-single", urls.length === 1);
-      gallery.innerHTML = urls.map((url, slot) => `<img src="${esc(url)}" alt="${esc(imageLabel)}, direction ${slot + 1}">`).join("");
+      fillTooltipStills(gallery, urls, imageLabel);
     } catch (_error) {
       if (token === state.matchTooltipToken && tooltip.isConnected) {
-        tooltip.querySelector(".omt-match-tooltip-loading").textContent = "Preview unavailable";
+        tooltip.querySelectorAll(".omt-match-tooltip-loading-slot").forEach((slot) => {
+          slot.textContent = "Preview unavailable";
+        });
       }
     }
   }
