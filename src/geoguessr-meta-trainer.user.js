@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.37
+// @version      2.2.0-beta.38
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -710,7 +710,92 @@
     document.documentElement.appendChild(host);
     state.root = host;
     state.shadow = host.attachShadow({ mode: "open" });
+    bindShadowDelegates();
     syncMapColorVariables();
+  }
+
+  // Every control in the dock is handled here, on the shadow root, which is the
+  // only node that survives a render.
+  //
+  // render() replaces the whole shadow tree, and it runs from a dozen places
+  // including map idle - so a listener attached to a button lives until the
+  // next render, and a click that starts before one and finishes after it lands
+  // on an element that no longer exists. That is why the Colors and Settings
+  // panels could not be opened at all: the summary was replaced mid-click, so
+  // the toggle never completed.
+  //
+  // <details> is also driven from state rather than its own DOM flag, since
+  // that flag would be lost with the element that holds it.
+  function bindShadowDelegates() {
+    const shadow = state.shadow;
+    if (!shadow || shadow.__omtDelegated) return;
+    shadow.__omtDelegated = true;
+
+    shadow.addEventListener("click", (event) => {
+      const path = event.composedPath();
+      const hit = (selector) => path.find((node) => node?.matches?.(selector));
+      const summary = hit(".omt-dock-settings > summary");
+      if (summary) {
+        // take the toggle over from the browser, so the open state is ours
+        event.preventDefault();
+        const which = summary.parentElement?.id;
+        if (which === "omt-dock-settings") state.settingsOpen = !state.settingsOpen;
+        if (which === "omt-dock-colors") state.dockColorsOpen = !state.dockColorsOpen;
+        render();
+        return;
+      }
+      if (hit("#omt-compare-launch")) return openVisualBoard();
+      if (hit("#omt-mode-cycle")) return cycleMapLayers();
+      if (hit("#omt-guess-cycle")) return setGuessComparison(!state.showGuessNeighbors);
+    });
+
+    const onValue = (event) => {
+      const target = event.target;
+      const id = target?.id;
+      if (!id) return;
+      switch (id) {
+        case "omt-set-dots":
+          state.showDots = target.checked;
+          break;
+        case "omt-set-clouds":
+        case "omt-band-intensity":
+          state.bandIntensity = normalizeIntensity(Number(target.value) / 100, 0.4);
+          break;
+        case "omt-set-matches":
+        case "omt-match-count":
+          return setMatchCount(target.value);
+        case "omt-set-grid":
+          state.boardGrid = Number(target.value) === 4 ? 4 : 3;
+          state.visualBoard = null;
+          saveMapColorPreferences();
+          if (state.visualBoardOpen) openVisualBoard();
+          return;
+        case "omt-set-board-quad":
+          state.boardAllDirections = target.checked;
+          state.visualBoard = null;
+          saveMapColorPreferences();
+          if (state.visualBoardOpen) openVisualBoard();
+          return;
+        case "omt-set-dot-quad":
+          state.dotPreviewAllDirections = target.checked;
+          break;
+        case "omt-dot-color":
+        case "omt-dock-dot-color":
+          return setMapColor("dots", target.value);
+        case "omt-guess-dot-color":
+        case "omt-dock-guess-dot-color":
+          return setMapColor("guess", target.value);
+        case "omt-click-color":
+        case "omt-dock-click-color":
+          return setMapColor("click", target.value);
+        default:
+          return;
+      }
+      saveMapColorPreferences();
+      showMetaOnMap(false);
+    };
+    shadow.addEventListener("input", onValue);
+    shadow.addEventListener("change", onValue);
   }
 
   const legacyStyles = `
@@ -1123,60 +1208,11 @@
     return `<div class="omt-dock">${compare}${mode}${guess}${display}${settings}</div>`;
   }
 
-  function bindDockUi() {
-    state.shadow.getElementById("omt-compare-launch")?.addEventListener("click", openVisualBoard);
-    state.shadow.getElementById("omt-mode-cycle")?.addEventListener("click", cycleMapLayers);
-    state.shadow.getElementById("omt-guess-cycle")?.addEventListener("click", () => {
-      setGuessComparison(!state.showGuessNeighbors);
-    });
-    // Remember whether it was open, or the next render - which happens on map
-    // idle, on hover, on almost anything - silently closes it again. That is
-    // why the button looked like it did nothing.
-    state.shadow.getElementById("omt-dock-settings")?.addEventListener("toggle", (event) => {
-      state.settingsOpen = event.target.open;
-    });
-    state.shadow.getElementById("omt-set-dots")?.addEventListener("change", (event) => {
-      state.showDots = event.target.checked;
-      saveMapColorPreferences();
-      showMetaOnMap(false);
-    });
-    state.shadow.getElementById("omt-set-clouds")?.addEventListener("input", (event) => {
-      state.bandIntensity = normalizeIntensity(Number(event.target.value) / 100, 0.4);
-      saveMapColorPreferences();
-      showMetaOnMap(false);
-    });
-    state.shadow.getElementById("omt-set-matches")?.addEventListener("change", (event) => {
-      setMatchCount(event.target.value);
-    });
-    state.shadow.getElementById("omt-set-grid")?.addEventListener("change", (event) => {
-      state.boardGrid = Number(event.target.value) === 4 ? 4 : 3;
-      saveMapColorPreferences();
-      state.visualBoard = null;          // rebuilt with a different tile count
-      if (state.visualBoardOpen) openVisualBoard();
-    });
-    state.shadow.getElementById("omt-set-board-quad")?.addEventListener("change", (event) => {
-      state.boardAllDirections = event.target.checked;
-      saveMapColorPreferences();
-      state.visualBoard = null;
-      if (state.visualBoardOpen) openVisualBoard();
-    });
-    state.shadow.getElementById("omt-set-dot-quad")?.addEventListener("change", (event) => {
-      state.dotPreviewAllDirections = event.target.checked;
-      saveMapColorPreferences();
-    });
-    state.shadow.getElementById("omt-dock-colors")?.addEventListener("toggle", (event) => {
-      state.dockColorsOpen = event.target.open;
-    });
-    state.shadow.getElementById("omt-dock-dot-color")?.addEventListener("input", (event) => {
-      setMapColor("dots", event.target.value);
-    });
-    state.shadow.getElementById("omt-dock-guess-dot-color")?.addEventListener("input", (event) => {
-      setMapColor("guess", event.target.value);
-    });
-    state.shadow.getElementById("omt-dock-click-color")?.addEventListener("input", (event) => {
-      setMapColor("click", event.target.value);
-    });
-  }
+  // Kept as a hook for anything that genuinely needs rebinding after a render.
+  // Dock controls are handled by delegation instead - see bindShadowDelegates -
+  // because listeners bound here die with the markup on the next render.
+  function bindDockUi() {}
+
 
   function render() {
     ensureRoot();
