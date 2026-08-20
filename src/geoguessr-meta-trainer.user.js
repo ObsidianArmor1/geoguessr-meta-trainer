@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.41
+// @version      2.2.0-beta.42
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -1503,7 +1503,11 @@
     }
     if (!state.review || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     const target = event.composedPath?.()[0] || event.target;
-    if (target?.matches?.("input, select, textarea, [contenteditable=true]")) return;
+    // Only text entry should swallow a hotkey. Checkboxes, ranges and selects
+    // do not consume letters, and refusing V while the settings panel had focus
+    // meant opening the panel disabled the comparison board.
+    if (target?.matches?.("textarea, [contenteditable=true], input[type=text], "
+      + "input[type=number], input[type=search], input[type=email], input[type=url]")) return;
     if (event.code === "KeyM") {
       event.preventDefault();
       event.stopPropagation();
@@ -2133,32 +2137,35 @@
       peek.className = "omt-board-peek";
       peek.innerHTML = `<div class="omt-board-peek-media"><img alt="${esc(tile.dataset.boardLabel || "Enlarged comparison view")}"><div class="omt-native-pano" aria-label="High-resolution Street View"></div></div><div class="omt-board-peek-caption"><b>${esc(tile.dataset.boardLabel || "Comparison view")}</b><span>${esc(tile.dataset.boardDetail || "")}</span></div>`;
       element.appendChild(peek);
-      // A tile showing four directions must enlarge to four directions. The
-      // peek used to take the tile's first image and mount a Street View widget
-      // over it, and a widget shows one direction by construction - so with the
-      // four-direction setting on, shift showed a single view.
-      const sources = [...tile.querySelectorAll("img")];
+      // What shift enlarges to is its own setting, and it governs the
+      // comparison board as well as the map dots - a tile showing one view can
+      // open into four, and a tile showing four can open into one live
+      // panorama. Reading it from the tile's own images instead, as this did,
+      // made the setting look broken here and left the single-view markup in
+      // place underneath the four-way grid.
+      const panoId = tile.dataset.boardPano;
+      const heading = Number(tile.dataset.boardHeading) || 0;
       const image = peek.querySelector("img");
-      if (sources.length > 1) {
+      if (state.dotShiftAllDirections && panoId) {
         const media = peek.querySelector(".omt-board-peek-media");
         image.remove();
         peek.querySelector(".omt-native-pano")?.remove();
         const quad = document.createElement("div");
         quad.className = "omt-peek-quad";
         media.prepend(quad);
-        sources.forEach(async (source, slot) => {
+        for (let slot = 0; slot < 4; slot += 1) {
           const element = document.createElement("img");
           element.alt = `${tile.dataset.boardLabel || "Comparison view"}, direction ${slot + 1}`;
           quad.appendChild(element);
-          const src = source.currentSrc || source.src
-            || (source.dataset.src ? await imageUrl(source.dataset.src) : "");
-          if (src && peek.isConnected) {
-            // ask for the larger frame the peek can actually show
-            element.src = fitViewToBox(src, quad.clientWidth / 2, quad.clientHeight / 2);
-          }
-        });
+          element.src = fitViewToBox(
+            corpusViewUrl(panoId, heading + slot * 90),
+            quad.clientWidth / 2,
+            quad.clientHeight / 2,
+          );
+        }
         return;
       }
+      // one direction: the still first, then the live panorama over it
       if (source.currentSrc || source.src) {
         image.src = source.currentSrc || source.src;
       } else if (source.dataset.src) {
