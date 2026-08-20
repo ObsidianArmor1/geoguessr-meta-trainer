@@ -72,6 +72,28 @@ async function main() {
   assert.equal(adapted.visualBoard.modes[0].entries.length, 2);
   assert.equal(adapted.location.views.length, 4);
 
+  const boardClient = new ModalCradioClient({ ...storage() });
+  const guessBoard = boardClient.buildVisualBoard(adapted, {
+    guessAnchor: {
+      panoId: "match-2",
+      heading: 173,
+      distanceFromGuessKm: 1.4,
+      roundRank: 2,
+      similarityToRound: 0.90,
+      selectedBy: "strongest round match within radius",
+    },
+  }, { tiles: 15 });
+  assert.equal(
+    guessBoard.modes[0].guessMatch.panoId,
+    "match-2",
+    "4x4 comparison reserves tile two for the best visual case near the guess",
+  );
+  assert.equal(
+    guessBoard.modes[0].entries.some((entry) => entry.panoId === "match-2"),
+    false,
+    "the guess-side example is not repeated among global ranked matches",
+  );
+
   const packV2NullRows = adaptResponse({
     ...rawResponse,
     matches: rawResponse.matches.map((match) => ({ ...match, mapIndex: null })),
