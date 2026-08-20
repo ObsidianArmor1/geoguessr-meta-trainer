@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.52
+// @version      2.2.0-beta.53
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.52";
+  const USERSCRIPT_VERSION = "2.2.0-beta.53";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -183,6 +183,7 @@
     review: null,
     fastNeighborhood: null,
     guessNeighborhood: null,
+    guessNeighborhoodPromise: null,
     active: 0,
     detail: new Map(),
     drawerOpen: false,
@@ -2419,7 +2420,16 @@
   async function openVisualBoard() {
     if (!state.review || !state.shadow) return;
     state.visualBoardOpen = true;
-    if (state.visualBoard?.panoId === state.review.location.panoId
+    const review = state.review;
+    const token = state.requestToken;
+    // The second corpus tile teaches from the player's guess, regardless of
+    // whether the separate guess-cloud map overlay is visible. Previously that
+    // tile was conditional on `showGuessNeighbors`, so hiding the purple dots
+    // silently replaced it with global match #1.
+    const needsGuessExample = Boolean(
+      review.universal && state.playerGuess && !state.guessNeighborhood,
+    );
+    if (!needsGuessExample && state.visualBoard?.panoId === review.location.panoId
         && state.visualBoard?.corpus === Boolean(state.review.universal)
         && (state.visualBoard?.corpus
           || (state.visualBoard?.mapIndex === state.review.location.mapIndex
@@ -2433,19 +2443,25 @@
     loading.textContent = "Finding coherent visual interpretations…";
     state.shadow.appendChild(loading);
     try {
+      if (needsGuessExample) {
+        loading.textContent = "Finding the best visual case near your guess…";
+        await loadGuessNeighborhood(token);
+        if (token !== state.requestToken || state.review !== review
+            || !state.visualBoardOpen) return;
+      }
       // The corpus path has no dataset and no map index, so /api/visual-board
       // cannot serve it. Build the board from the round's own matches and the
       // guess-side anchor instead.
-      const board = state.review.universal
+      const board = review.universal
         ? cradioClient.buildVisualBoard(
-            state.review,
-            state.showGuessNeighbors ? state.guessNeighborhood : null,
+            review,
+            state.guessNeighborhood,
             // a 3x3 board holds the round plus 8, a 4x4 the round plus 15
             { tiles: state.boardGrid * state.boardGrid - 1 },
           )
         : await preloadVisualBoard(
-            state.review.datasetKey,
-            state.review.location.mapIndex,
+            review.datasetKey,
+            review.location.mapIndex,
           );
       if (!board) return;
       if (!state.visualBoardOpen || !state.review) return;
@@ -3938,6 +3954,7 @@
     state.review = null;
     state.fastNeighborhood = null;
     state.guessNeighborhood = null;
+    state.guessNeighborhoodPromise = null;
     state.active = 0;
     state.detail.clear();
     state.drawerOpen = false;
@@ -4076,43 +4093,70 @@
   async function loadGuessNeighborhood(token) {
     const review = state.review;
     const guess = state.playerGuess;
-    if (!state.showGuessNeighbors || !review || !guess) return;
-    if (review.universal) {
-      // Corpus path: no dataset to query, so the pack answers directly.
-      try {
-        const comparison = await cradioClient.guessNeighborhood(
-          guess,
-          { sourceMapKey: review.sourceMapKey, roundPanoId: review.location?.panoId },
-          review.visualNeighborhood?.visualMatches || [],
-        );
-        if (token !== state.requestToken || state.review !== review
-            || !state.showGuessNeighbors) return;
-        if (!comparison) return;
-        state.guessNeighborhood = comparison;
+    if (!review || !guess) return null;
+    if (state.guessNeighborhood) {
+      // The board may have warmed this while the map layer was hidden. If the
+      // player later enables the layer, use that cached result immediately.
+      if (state.showGuessNeighbors) {
         render();
         showMetaOnMap(false);
-      } catch (error) {
-        console.error("Meta Trainer: could not load guess-side cloud", error);
       }
-      return;
+      return state.guessNeighborhood;
     }
-    try {
-      const query = new URLSearchParams({
-        dataset: review.datasetKey,
-        guess_lat: guess.lat,
-        guess_lng: guess.lng,
-      });
-      const comparison = await request(
-        `/api/guess-neighborhood/${review.location.mapIndex}?${query}`,
-      );
-      if (token !== state.requestToken || state.review !== review
-          || !state.showGuessNeighbors) return;
-      state.guessNeighborhood = comparison;
-      render();
-      showMetaOnMap(false);
-    } catch (error) {
-      console.error("Meta Trainer: could not load guess-side visual neighborhood", error);
-    }
+    if (state.guessNeighborhoodPromise) return state.guessNeighborhoodPromise;
+
+    // This data has two independent consumers: the optional guess map overlay
+    // and the always-useful comparison-board tile. Load it once and let either
+    // consumer use it; visibility must never control whether it exists.
+    let pending;
+    pending = (async () => {
+      try {
+        let comparison;
+        if (review.universal) {
+          // Corpus path: no dataset to query, so the pack answers directly.
+          comparison = await cradioClient.guessNeighborhood(
+            guess,
+            { sourceMapKey: review.sourceMapKey, roundPanoId: review.location?.panoId },
+            review.visualNeighborhood?.visualMatches || [],
+          );
+        } else {
+          const query = new URLSearchParams({
+            dataset: review.datasetKey,
+            guess_lat: guess.lat,
+            guess_lng: guess.lng,
+          });
+          comparison = await request(
+            `/api/guess-neighborhood/${review.location.mapIndex}?${query}`,
+          );
+        }
+        if (token !== state.requestToken || state.review !== review || !comparison) return null;
+        state.guessNeighborhood = comparison;
+        // A corpus board built before this lookup completed is incomplete. Make
+        // the next render rebuild it with the near-guess tile in slot two.
+        if (review.universal && state.visualBoard?.panoId === review.location?.panoId) {
+          state.visualBoard = null;
+        }
+        if (state.showGuessNeighbors) {
+          render();
+          showMetaOnMap(false);
+        }
+        return comparison;
+      } catch (error) {
+        console.error(
+          review.universal
+            ? "Meta Trainer: could not load guess-side cloud"
+            : "Meta Trainer: could not load guess-side visual neighborhood",
+          error,
+        );
+        return null;
+      } finally {
+        if (state.guessNeighborhoodPromise === pending) {
+          state.guessNeighborhoodPromise = null;
+        }
+      }
+    })();
+    state.guessNeighborhoodPromise = pending;
+    return pending;
   }
 
   async function applyFastNeighborhood(token) {
@@ -4448,7 +4492,11 @@
       clearTimeout(state.offlineRetryTimer);
       state.drawerOpen = false;
       render();
-      if (state.showGuessNeighbors) loadGuessNeighborhood(token);
+      // The guess-side lookup also supplies tile two of the visual comparison.
+      // Warm it on every corpus round even when its map overlay is switched off.
+      if ((review.universal && state.playerGuess) || state.showGuessNeighbors) {
+        loadGuessNeighborhood(token);
+      }
       recordRoundOutcome(round, review).catch(() => {
         // Passive local history must never affect the post-round interface.
       });
