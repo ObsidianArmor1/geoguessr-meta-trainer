@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.36
+// @version      2.2.0-beta.37
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -111,8 +111,18 @@
     // panorama, which is the ceiling without rebuilding it - so this is a slice
     // of a row already in hand, and changing it costs no fetch and no refetch.
     matchCount: 300,
+    // Dots and clouds are separate layers: either can be turned off, so the map
+    // can show individual matches, the shape of the distribution, or both.
+    showDots: true,
+    // 3 draws a 3x3 board (the round plus 8), 4 draws 4x4 (the round plus 15).
+    boardGrid: 3,
+    // Each board tile as the road-aligned view only, or as all four directions
+    // the corpus was embedded from.
+    boardAllDirections: false,
+    // The same choice for the preview that appears when hovering a dot.
+    dotPreviewAllDirections: true,
   };
-  const MATCH_COUNT_MIN = 10;
+  const MATCH_COUNT_MIN = 20;
   const MATCH_COUNT_MAX = 300;
   const LEGACY_GUESS_DOT_COLOR = "#9b6cff";
   const liveChallengeAdapter = globalThis.OMTLiveChallenge;
@@ -200,6 +210,11 @@
     // on the map underneath and the player.
     bandIntensity: mapColorPreferences.bandIntensity,
     matchCount: mapColorPreferences.matchCount,
+    showDots: mapColorPreferences.showDots,
+    boardGrid: mapColorPreferences.boardGrid,
+    boardAllDirections: mapColorPreferences.boardAllDirections,
+    dotPreviewAllDirections: mapColorPreferences.dotPreviewAllDirections,
+    settingsOpen: false,
     neighborClickColor: mapColorPreferences.neighborClick,
     guessDotColor: mapColorPreferences.guessDots,
     matchTooltip: null,
@@ -294,6 +309,10 @@
           : storedGuessDots,
         bandIntensity: normalizeIntensity(stored?.bandIntensity, DEFAULT_MAP_COLORS.bandIntensity),
         matchCount: normalizeMatchCount(stored?.matchCount, DEFAULT_MAP_COLORS.matchCount),
+        showDots: stored?.showDots !== false,
+        boardGrid: Number(stored?.boardGrid) === 4 ? 4 : 3,
+        boardAllDirections: stored?.boardAllDirections === true,
+        dotPreviewAllDirections: stored?.dotPreviewAllDirections !== false,
       };
     } catch (_error) {
       return { ...DEFAULT_MAP_COLORS };
@@ -329,6 +348,10 @@
       guessDots: state.guessDotColor,
       bandIntensity: state.bandIntensity,
       matchCount: state.matchCount,
+      showDots: state.showDots,
+      boardGrid: state.boardGrid,
+      boardAllDirections: state.boardAllDirections,
+      dotPreviewAllDirections: state.dotPreviewAllDirections,
     }));
   }
 
@@ -769,6 +792,8 @@
     .omt-board-body { min-height:0; flex:1; padding:10px; }
     .omt-board-current,.omt-board-match { position:relative; min-width:0; min-height:0; overflow:hidden; border:1px solid #ffffff20; border-radius:5px; background:#020402; }
     .omt-board-current img,.omt-board-match img { width:100%; height:100%; display:block; object-fit:contain; }
+    .omt-board-quad { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:1px; width:100%; height:100%; }
+    .omt-board-quad img { width:100%; height:100%; object-fit:cover; }
     .omt-board-current strong,.omt-board-match span { position:absolute; left:0; top:0; padding:6px 9px; color:#fff; background:#07100be8; font-size:12px; }
     .omt-board-current strong { color:#c8ff70; font-size:14px; }
     .omt-board-grid { width:100%; height:100%; min-width:0; min-height:0; display:grid; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(3,1fr); gap:6px; }
@@ -840,6 +865,12 @@
     @keyframes omt-pulse { to { opacity:.32; } }
     .omt-dock-swatch { display:inline-block; width:9px; height:9px; margin-right:6px; border:1px solid #ffffff55; border-radius:50%; }
     .omt-dock button.active .omt-dock-swatch { box-shadow:0 0 0 2px #ffffff35; }
+    .omt-settings-panel { display:flex; flex-direction:column; grid-template-columns:none; gap:9px; min-width:250px; }
+    .omt-setting { display:flex; align-items:center; justify-content:space-between; gap:10px; color:#d9dbe0; font-size:11px; font-weight:650; white-space:nowrap; }
+    .omt-setting input[type=checkbox] { order:-1; margin:0 6px 0 0; }
+    .omt-setting input[type=range] { width:96px; }
+    .omt-setting input[type=number] { width:62px; padding:3px 5px; border:1px solid var(--line); border-radius:5px; color:#fff; background:#ffffff10; }
+    .omt-setting select { padding:3px 5px; border:1px solid var(--line); border-radius:5px; color:#fff; background:#17181b; }
     .omt-dock-settings { position:relative; display:flex; align-items:stretch; border-left:1px solid var(--line); }
     .omt-dock-settings summary { display:flex; align-items:center; min-height:40px; padding:8px 12px; color:#d9dbe0; cursor:pointer; font-weight:650; list-style:none; }
     .omt-dock-settings summary::-webkit-details-marker { display:none; }
@@ -1075,10 +1106,21 @@
     const guess = review.visualNeighborhood
       ? `<button id="omt-guess-cycle" class="${state.showGuessNeighbors ? "active" : ""}" title="Show or hide the cloud around your guess" ${state.playerGuess ? "" : "disabled"}><i class="omt-dock-swatch" style="background:${esc(state.guessDotColor)}"></i>Guess <kbd>G</kbd></button>`
       : "";
+    const display = review.visualNeighborhood
+      ? `<details class="omt-dock-settings" id="omt-dock-settings"${state.settingsOpen ? " open" : ""}><summary>Settings</summary>`
+        + `<div class="omt-dock-settings-panel omt-settings-panel">`
+        + `<label class="omt-setting"><input type="checkbox" id="omt-set-dots" ${state.showDots ? "checked" : ""}>Dots</label>`
+        + `<label class="omt-setting">Clouds <input type="range" id="omt-set-clouds" min="0" max="100" step="5" value="${Math.round(state.bandIntensity * 100)}"></label>`
+        + `<label class="omt-setting">Matches per round <input type="number" id="omt-set-matches" min="${MATCH_COUNT_MIN}" max="${MATCH_COUNT_MAX}" step="10" value="${state.matchCount}"></label>`
+        + `<label class="omt-setting">Comparison grid <select id="omt-set-grid"><option value="3"${state.boardGrid === 3 ? " selected" : ""}>3 x 3</option><option value="4"${state.boardGrid === 4 ? " selected" : ""}>4 x 4</option></select></label>`
+        + `<label class="omt-setting"><input type="checkbox" id="omt-set-board-quad" ${state.boardAllDirections ? "checked" : ""}>Comparison shows all four directions</label>`
+        + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-quad" ${state.dotPreviewAllDirections ? "checked" : ""}>Dot preview shows all four directions</label>`
+        + `</div></details>`
+      : "";
     const settings = review.visualNeighborhood
       ? `<details class="omt-dock-settings" id="omt-dock-colors"${state.dockColorsOpen ? " open" : ""}><summary>Colors</summary><div class="omt-dock-settings-panel"><label class="omt-color-setting">Round <input type="color" id="omt-dock-dot-color" value="${state.neighborDotColor}"></label><label class="omt-color-setting">Guess <input type="color" id="omt-dock-guess-dot-color" value="${state.guessDotColor}"></label><label class="omt-color-setting">Click <input type="color" id="omt-dock-click-color" value="${state.neighborClickColor}"></label></div></details>`
       : "";
-    return `<div class="omt-dock">${compare}${mode}${guess}${settings}</div>`;
+    return `<div class="omt-dock">${compare}${mode}${guess}${display}${settings}</div>`;
   }
 
   function bindDockUi() {
@@ -1090,6 +1132,38 @@
     // Remember whether it was open, or the next render - which happens on map
     // idle, on hover, on almost anything - silently closes it again. That is
     // why the button looked like it did nothing.
+    state.shadow.getElementById("omt-dock-settings")?.addEventListener("toggle", (event) => {
+      state.settingsOpen = event.target.open;
+    });
+    state.shadow.getElementById("omt-set-dots")?.addEventListener("change", (event) => {
+      state.showDots = event.target.checked;
+      saveMapColorPreferences();
+      showMetaOnMap(false);
+    });
+    state.shadow.getElementById("omt-set-clouds")?.addEventListener("input", (event) => {
+      state.bandIntensity = normalizeIntensity(Number(event.target.value) / 100, 0.4);
+      saveMapColorPreferences();
+      showMetaOnMap(false);
+    });
+    state.shadow.getElementById("omt-set-matches")?.addEventListener("change", (event) => {
+      setMatchCount(event.target.value);
+    });
+    state.shadow.getElementById("omt-set-grid")?.addEventListener("change", (event) => {
+      state.boardGrid = Number(event.target.value) === 4 ? 4 : 3;
+      saveMapColorPreferences();
+      state.visualBoard = null;          // rebuilt with a different tile count
+      if (state.visualBoardOpen) openVisualBoard();
+    });
+    state.shadow.getElementById("omt-set-board-quad")?.addEventListener("change", (event) => {
+      state.boardAllDirections = event.target.checked;
+      saveMapColorPreferences();
+      state.visualBoard = null;
+      if (state.visualBoardOpen) openVisualBoard();
+    });
+    state.shadow.getElementById("omt-set-dot-quad")?.addEventListener("change", (event) => {
+      state.dotPreviewAllDirections = event.target.checked;
+      saveMapColorPreferences();
+    });
     state.shadow.getElementById("omt-dock-colors")?.addEventListener("toggle", (event) => {
       state.dockColorsOpen = event.target.open;
     });
@@ -1870,6 +1944,18 @@
     return panorama;
   }
 
+  // A tile's imagery: the road-aligned view, or all four directions the corpus
+  // was embedded from. Four thumbnails cost four requests but show the whole
+  // panorama, which is what the dot previews have always done.
+  function tileImages(panoId, heading, attributes, alt) {
+    if (!state.boardAllDirections || !panoId || !Number.isFinite(Number(heading))) {
+      return `<img data-src="${esc(corpusViewUrl(panoId, heading))}" ${attributes} alt="${esc(alt)}">`;
+    }
+    return `<div class="omt-board-quad">` + [0, 90, 180, 270].map((offset, slot) =>
+      `<img data-src="${esc(corpusViewUrl(panoId, Number(heading) + offset))}" ${attributes} `
+      + `alt="${esc(alt)}, direction ${slot + 1}">`).join("") + `</div>`;
+  }
+
   function renderVisualBoard() {
     if (!state.visualBoardOpen || !state.shadow || !state.visualBoard) return;
     state.visualBoardModifierCleanup?.();
@@ -1912,14 +1998,14 @@
           ? ""
           : `${similarityText(item.viewSimilarity)} · `;
         const detail = `${strength}${distance} from guess${rank ? ` · ${rank}` : ""}`;
-        return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Best visual match near your guess"><span>Near your guess</span><em>${esc(detail)}</em></button>`;
+        return `<button class="omt-board-match omt-board-guess" data-board-entry="${item.mapIndex}" data-board-kind="guess-local" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}">${tileImages(item.panoId, item.heading, contentAttributes, "Best visual match near your guess")}<span>Near your guess</span><em>${esc(detail)}</em></button>`;
       }
       const distance = item.distanceKm < 1
         ? `${Math.round(item.distanceKm * 1000)} m`
         : `${item.distanceKm.toFixed(1)} km`;
       const label = `Visual match #${item.rank}${item.reciprocal ? " · mutual match" : ""}`;
       const detail = `${similarityText(item.viewSimilarity)} · ${distance}`;
-      return `<button class="omt-board-match" data-board-entry="${item.mapIndex}" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}"><img data-src="${esc(item.view)}" ${contentAttributes} alt="Visual match ${item.rank}"><span>#${item.rank}${item.reciprocal ? " · mutual" : ""}</span><em>${esc(detail)}</em></button>`;
+      return `<button class="omt-board-match" data-board-entry="${item.mapIndex}" data-board-pano="${esc(item.panoId)}" data-board-heading="${Number(item.heading) || 0}" data-board-inspect data-board-label="${esc(label)}" data-board-detail="${esc(detail)}" aria-label="${esc(label)}. ${esc(detail)}">${tileImages(item.panoId, item.heading, contentAttributes, `Visual match ${item.rank}`)}<span>#${item.rank}${item.reciprocal ? " · mutual" : ""}</span><em>${esc(detail)}</em></button>`;
     }).join("");
     const interpretation = board.corpus
       ? "Closest panoramas in the corpus, each shown along its own road direction."
@@ -1933,7 +2019,7 @@
     const guessReceipt = mode.guessMatch
       ? `<span><b>best of ${mode.guessMatch.candidatePool}</b> locations near your guess</span>`
       : "";
-    element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid"><div class="omt-board-current" tabindex="0" data-board-pano="${esc(board.panoId)}" data-board-heading="${Number(mode.currentHeading) || 0}" data-board-inspect data-board-label="This round" data-board-detail="The panorama this round spawned on"><img data-src="${esc(mode.currentView)}" data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0" alt="Current round heading ${mode.currentHeading}"><strong>This round</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}${board.corpus
+    element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid" style="grid-template-columns:repeat(${state.boardGrid},1fr);grid-template-rows:repeat(${state.boardGrid},1fr)"><div class="omt-board-current" tabindex="0" data-board-pano="${esc(board.panoId)}" data-board-heading="${Number(mode.currentHeading) || 0}" data-board-inspect data-board-label="This round" data-board-detail="The panorama this round spawned on">${tileImages(board.panoId, mode.currentHeading, `data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0"`, "This round")}<strong>This round</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}${board.corpus
         ? `<span><b>${mode.support}</b> of ${mode.supportOf} in the close core</span><span><b>${mode.independentAreas}</b> separate areas</span>`
         : `<span><b>${literal ? "nearest visual views" : `${mode.support}/100`}</b> in this group</span><span><b>${mode.reciprocalSupport}</b> mutual matches</span><span><b>${mode.independentAreas}</b> separate areas</span><span><b>${Math.round(mode.coherence * 100)}%</b> visual agreement</span>`}<span class="omt-board-warning">Visual similarity is evidence, not certainty.</span></footer>`;
     state.shadow.appendChild(element);
@@ -2112,6 +2198,8 @@
         ? cradioClient.buildVisualBoard(
             state.review,
             state.showGuessNeighbors ? state.guessNeighborhood : null,
+            // a 3x3 board holds the round plus 8, a 4x4 the round plus 15
+            { tiles: state.boardGrid * state.boardGrid - 1 },
           )
         : await preloadVisualBoard(
             state.review.datasetKey,
@@ -2291,7 +2379,8 @@
       const urls = point.current && Array.isArray(point.viewUrls)
         ? point.viewUrls
         : Number.isFinite(point.heading) && point.panoId
-          ? [0, 90, 180, 270].map((offset) => corpusViewUrl(point.panoId, point.heading + offset))
+          ? (state.dotPreviewAllDirections ? [0, 90, 180, 270] : [0])
+            .map((offset) => corpusViewUrl(point.panoId, point.heading + offset))
           : await Promise.all([0, 1, 2, 3].map((slot) =>
             imageUrl(`/api/view/${point.mapIndex}/${slot}${viewSuffix(point)}`)
           ));
@@ -3034,7 +3123,10 @@
           drawMassBands(context, width, height, guessSamples, state.guessDotColor,
             state.bandIntensity);
 
-          for (const point of rankedPoints) {
+          // Dots are a layer like the bands: with them off the map shows the
+          // shape of the distribution and nothing else. The hit targets go with
+          // them, since an invisible dot is not something to hover.
+          for (const point of state.showDots ? rankedPoints : []) {
             const pixel = viewportPoint(point);
             if (pixel.x < -18 || pixel.x > width + 18 || pixel.y < -18 || pixel.y > height + 18) continue;
             visible += 1;
