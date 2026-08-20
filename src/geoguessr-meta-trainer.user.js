@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.49
+// @version      2.2.0-beta.50
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.49";
+  const USERSCRIPT_VERSION = "2.2.0-beta.50";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -3525,8 +3525,11 @@
         Number(context.visualNeighborhood?.coreCount) || Math.min(50, visualMatches.length),
         visualMatches.length,
       );
+      const matchIdentity = (match) => match.panoId
+        ? `pano:${match.panoId}`
+        : `row:${match.mapIndex}`;
       for (const match of visualMatches) {
-        combined.set(match.mapIndex, {
+        combined.set(matchIdentity(match), {
           ...match,
           core: Number(match.rank) <= coreCount,
           comparisonSide: "round",
@@ -3538,7 +3541,8 @@
         });
       }
       for (const match of guessMatches) {
-        const existing = combined.get(match.mapIndex);
+        const identity = matchIdentity(match);
+        const existing = combined.get(identity);
         if (existing) {
           Object.assign(existing, {
             comparisonSide: "both",
@@ -3550,7 +3554,7 @@
             rank: Math.min(existing.rank, match.rank),
           });
         } else {
-          combined.set(match.mapIndex, {
+          combined.set(identity, {
             ...match,
             comparisonSide: "guess",
             guessRank: match.rank,
