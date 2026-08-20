@@ -72,6 +72,21 @@ async function main() {
   assert.equal(adapted.visualBoard.modes[0].entries.length, 2);
   assert.equal(adapted.location.views.length, 4);
 
+  const packV2NullRows = adaptResponse({
+    ...rawResponse,
+    matches: rawResponse.matches.map((match) => ({ ...match, mapIndex: null })),
+  }, {
+    panoId: queryPano,
+    latitude: 49,
+    longitude: 7,
+    sourceMapKey: "public-map",
+  });
+  assert.deepEqual(
+    packV2NullRows.visualNeighborhood.visualMatches.map((match) => match.mapIndex),
+    [0, 1],
+    "Pack V2 null row IDs remain distinct instead of collapsing to row zero",
+  );
+
   let calls = 0;
   const request = async (options) => {
     calls += 1;

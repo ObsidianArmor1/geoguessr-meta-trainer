@@ -123,7 +123,11 @@
       if (!point || !Number.isFinite(similarity)) return null;
       return {
         datasetKey,
-        mapIndex: Number.isInteger(Number(item.mapIndex)) ? Number(item.mapIndex) : index,
+        // Pack V2 deliberately omits corpus row numbers. Number(null) is 0,
+        // so coercing first made every fresh-pack match appear to own row 0;
+        // the map layer then collapsed the entire cloud into one point.
+        mapIndex: item.mapIndex !== null && item.mapIndex !== undefined
+          && Number.isInteger(Number(item.mapIndex)) ? Number(item.mapIndex) : index,
         panoId: String(item.panoId || ""),
         heading: Number.isFinite(Number(item.heading)) ? Number(item.heading) : null,
         rank: Number.isInteger(Number(item.rank)) ? Number(item.rank) : index + 1,
