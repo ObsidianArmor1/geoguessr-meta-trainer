@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.53
+// @version      2.2.0-beta.54
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.53";
+  const USERSCRIPT_VERSION = "2.2.0-beta.54";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -310,6 +310,10 @@
         trackedMaps: state.maps.size,
         eligibleMaps,
         overlays: state.overlays.length,
+        nativeStreetViewPool: {
+          renderers: nativePanoCache.size,
+          limit: NATIVE_PANO_POOL_LIMIT,
+        },
       },
       cloud: cradioClient.diagnostics?.() || {
         configured: cradioClient.configured(),
@@ -2004,11 +2008,11 @@
   // They are parked off-screen rather than hidden, because a display:none
   // panorama stops rendering and has to repaint on return - which is the thing
   // being avoided.
-  // A four-direction peek mounts four widgets at once, so this holds three
-  // tiles' worth. Every entry is a live Street View widget, and browsers cap
-  // how many WebGL contexts exist at once - somewhere around sixteen - so this
-  // is bounded deliberately rather than generously.
-  const NATIVE_PANO_CACHE_LIMIT = 12;
+  // A four-direction peek mounts four widgets at once. Retain exactly one
+  // peek's worth and RETARGET those renderers for later panoramas. The previous
+  // 12-widget cache eventually evicted GeoGuessr's own Google Maps WebGL
+  // renderer in Firefox, leaving our canvas dots on a blank beige basemap.
+  const NATIVE_PANO_POOL_LIMIT = 4;
   const nativePanoCache = new Map();
   let nativePanoAttic = null;
 
@@ -2048,14 +2052,42 @@
     return nativePanoAttic;
   }
 
-  function trimNativePanoCache() {
-    if (nativePanoCache.size <= NATIVE_PANO_CACHE_LIMIT) return;
-    const entries = [...nativePanoCache.entries()].sort((a, b) => a[1].usedAt - b[1].usedAt);
-    for (const [key, entry] of entries.slice(0, nativePanoCache.size - NATIVE_PANO_CACHE_LIMIT)) {
-      disposeNativePanoramas([entry.panorama]);
-      entry.host.remove();
-      nativePanoCache.delete(key);
-    }
+  function armNativePanoReveal(container, panorama) {
+    const maps = pageWindow.google?.maps;
+    const generation = Number(container.dataset.omtNativeGeneration || 0) + 1;
+    container.dataset.omtNativeGeneration = String(generation);
+    container.classList.remove("omt-native-pano-ready");
+    let revealTimer = 0;
+    const reveal = () => {
+      if (Number(container.dataset.omtNativeGeneration) !== generation) return;
+      const status = panorama.getStatus?.();
+      if (!maps?.StreetViewStatus || status === maps.StreetViewStatus.OK) {
+        window.clearTimeout(revealTimer);
+        // `pano_changed` and OK status precede the first painted tile by a few
+        // frames. Keep the correctly filled thumbnail beneath it during that
+        // interval instead of exposing the renderer's black backing surface.
+        revealTimer = window.setTimeout(() => {
+          if (container.isConnected
+              && Number(container.dataset.omtNativeGeneration) === generation) {
+            container.classList.add("omt-native-pano-ready");
+          }
+        }, 140);
+      }
+    };
+    maps?.event?.addListenerOnce?.(panorama, "status_changed", reveal);
+    maps?.event?.addListenerOnce?.(panorama, "pano_changed", () => {
+      window.setTimeout(reveal, 50);
+    });
+    window.setTimeout(reveal, 850);
+  }
+
+  function retargetNativeStreetView(entry, panoId, heading) {
+    if (!entry?.host || !entry.panorama) return null;
+    armNativePanoReveal(entry.host, entry.panorama);
+    entry.panorama.setPov?.({ heading: Number(heading) || 0, pitch: 0 });
+    entry.panorama.setPano?.(String(panoId));
+    pageWindow.google?.maps?.event?.trigger?.(entry.panorama, "resize");
+    return entry.panorama;
   }
 
   // Mounts a panorama in place of `slot`, reusing a live one when possible.
@@ -2070,10 +2102,25 @@
       pageWindow.google?.maps?.event?.trigger?.(cached.panorama, "resize");
       return cached.panorama;
     }
+
+    // Once four contexts exist, recycle the least-recently-used renderer. This
+    // keeps total GPU contexts constant even after Shift-hovering hundreds of
+    // panoramas; only its target pano and POV change.
+    if (nativePanoCache.size >= NATIVE_PANO_POOL_LIMIT) {
+      const [oldKey, reusable] = [...nativePanoCache.entries()]
+        .sort((a, b) => a[1].usedAt - b[1].usedAt)[0] || [];
+      if (reusable) {
+        nativePanoCache.delete(oldKey);
+        reusable.usedAt = Date.now();
+        slot.replaceWith(reusable.host);
+        retargetNativeStreetView(reusable, panoId, heading);
+        nativePanoCache.set(key, reusable);
+        return reusable.panorama;
+      }
+    }
     const panorama = nativeStreetView(slot, panoId, heading);
     if (panorama) {
       nativePanoCache.set(key, { host: slot, panorama, usedAt: Date.now() });
-      trimNativePanoCache();
     }
     return panorama;
   }
@@ -2099,6 +2146,15 @@
     if (Array.isArray(panoramas)) panoramas.length = 0;
   }
 
+  function disposeNativePanoPool() {
+    const entries = [...nativePanoCache.values()];
+    disposeNativePanoramas(entries.map((entry) => entry.panorama));
+    for (const entry of entries) entry.host?.remove();
+    nativePanoCache.clear();
+    nativePanoAttic?.remove();
+    nativePanoAttic = null;
+  }
+
   function nativeStreetView(container, panoId, heading) {
     const maps = pageWindow.google?.maps;
     if (!container || !panoId || !maps?.StreetViewPanorama) return null;
@@ -2119,25 +2175,7 @@
       showRoadLabels: false,
       zoomControl: false,
     });
-    let revealTimer = 0;
-    const reveal = () => {
-      const status = panorama.getStatus?.();
-      if (!maps.StreetViewStatus || status === maps.StreetViewStatus.OK) {
-        window.clearTimeout(revealTimer);
-        // `pano_changed` and OK status precede the first painted tile by a few
-        // frames in some browsers. Keep the correctly filled thumbnail under
-        // it briefly, then crossfade instead of exposing the renderer's black
-        // backing surface.
-        revealTimer = window.setTimeout(() => {
-          if (container.isConnected) container.classList.add("omt-native-pano-ready");
-        }, 140);
-      }
-    };
-    maps.event?.addListenerOnce?.(panorama, "status_changed", reveal);
-    maps.event?.addListenerOnce?.(panorama, "pano_changed", () => {
-      window.setTimeout(reveal, 50);
-    });
-    window.setTimeout(reveal, 850);
+    armNativePanoReveal(container, panorama);
     return panorama;
   }
 
@@ -4600,6 +4638,13 @@
   }
 
   setupMapCapture();
+  document.addEventListener("webglcontextlost", (event) => {
+    const trainerRenderer = Boolean(event.target?.closest?.(".omt-native-pano"));
+    diagnosticError(
+      "A page WebGL rendering context was lost",
+      trainerRenderer ? "trainer-streetview-webgl" : "page-webgl",
+    );
+  }, true);
   document.addEventListener("keydown", handleLayerHotkeys, true);
   document.addEventListener("keydown", handleMatchTooltipModifier, true);
   document.addEventListener("keyup", handleMatchTooltipModifier, true);
@@ -4612,6 +4657,7 @@
   window.addEventListener("blur", updateVisualExposureFocus, true);
   window.addEventListener("pagehide", () => {
     flushVisualExposure("pagehide");
+    disposeNativePanoPool();
   }, true);
   flushPendingVisualExposure();
   initializeLiveChallengeAdapter();

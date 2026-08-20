@@ -44,5 +44,13 @@ assert.match(source, /host\.appendChild\(grid\);\s*for \(const \[live, heading\]
   "all four high-resolution cells mount before expensive Street View construction begins");
 assert.doesNotMatch(source, /gallery\.innerHTML = urls\.map/,
   "thumbnail completion must not delete an already-mounted native Street View layer");
+assert.match(source, /const NATIVE_PANO_POOL_LIMIT = 4;/,
+  "native Street View is bounded to one four-direction peek's GPU contexts");
+assert.match(source, /if \(nativePanoCache\.size >= NATIVE_PANO_POOL_LIMIT\)/,
+  "later Shift hovers recycle an existing Street View renderer");
+assert.match(source, /entry\.panorama\.setPano\?\.\(String\(panoId\)\)/,
+  "the renderer pool retargets rather than accumulating WebGL contexts");
+assert.doesNotMatch(source, /NATIVE_PANO_CACHE_LIMIT = 12/,
+  "the context-evicting 12-renderer cache must not return");
 
 process.stdout.write("userscript architecture contract passed\n");
