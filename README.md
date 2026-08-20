@@ -1,65 +1,80 @@
-# GeoGuessr Visual Meta Trainer
+# GeoGuessr Visual Similarity Trainer
 
-Browser-local post-round visual study. These maps have full precomputed packs:
-
-- [Balanced World 50k](https://www.geoguessr.com/maps/6a7d99296a64847f955da936)
-- [Balanced USA 50k](https://www.geoguessr.com/maps/6a7d9951e250d15ffed33065)
+A post-round learning userscript that shows which panoramas in a global visual
+reference corpus look most like the revealed location, where those references
+occur, and how their suggested click compares with the player's guess.
 
 ## Install
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/).
-2. Open [the userscript](https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js).
-3. Press **Install**, then play a Street View map normally.
+2. Open the [raw userscript](https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js).
+3. Install it and play GeoGuessr normally.
 
-The review appears only after a round is over. `M` toggles the similarity map,
-`G` toggles the guess comparison, and `V` opens the visual-comparison board.
-The visible **Guess** and **Colors** controls persist their state between rounds.
-The optional **Guess comparison** layer
-draws the revealed location's visual matches as filled red points and the
-visual neighborhood of the nearest stored panorama to the player's guess as
-filled cobalt points. Shared locations use a single split red/cobalt point, and
-the review reports their overlap.
+The interface appears only after the round ends. Its visible controls expose
+the same actions as the keyboard shortcuts, including the similarity map, guess
+comparison, visual-comparison board, match count, colors, layout, and
+four-direction Street View previews. Settings persist between rounds.
 
-The match set is now selected per round from the shape of its ranked visual
-similarity curve. A boundary is shown only when the mean and median slope both
-change persistently; otherwise the review explicitly labels the nearest
-examples as diffuse instead of pretending that every panorama has a crisp
-visual meta.
+## Current retrieval architecture
 
-## How it runs
+The reference corpus is **Lodestar 1.1**: 999,693 validated, embedded Street
+View panoramas represented by C-RADIOv4-H.
 
-Balanced World and Balanced USA use their map-specific precomputed lookup
-packs. On other maps, the browser downloads two compact vision encoders plus a
-compressed Balanced World reference corpus, embeds the revealed panorama after
-the round, and searches that corpus locally. The arbitrary-map path sends no
-image or embedding to a query server. Assets are cached in IndexedDB and review
-thumbnails are requested live by panorama ID.
+For a panorama already in Lodestar, the userscript performs no inference. It:
 
-The universal pilot publishes FP32 query graphs. Chrome and Edge on macOS use
-WebGPU and are the recommended fast path. Browsers without ONNX Runtime WebGPU
-support, including Firefox, use a tested single-thread WASM compatibility path;
-it produces the same retrieval but currently takes roughly 12–14 seconds per
-panorama on the development Mac instead of roughly 3 seconds. The equivalent
-FP16 graphs are preserved as source artifacts, but current ONNX Runtime WebGPU
-rejects their mixed `f32 * f16` shader path.
+1. routes the panorama ID through a compressed 23 MB directory;
+2. downloads one roughly 0.5 MB static neighbor chunk;
+3. reads that panorama's precomputed global top-300 visual matches; and
+4. renders the cloud, strong core, suggested click, previews, and comparison
+   board locally.
 
-The World 50K corpus is a first pilot, not a claim of universal geographic
-coverage. Its purpose is to make the existing similarity workflow usable on
-unseen maps while the much larger, deliberately balanced reference corpus is
-built and validated.
+Directory, chunk, heading, and projection assets are cached in IndexedDB. The
+public static pack is hosted in
+[`ObsidianArmor1/lodestar-neighbors`](https://github.com/ObsidianArmor1/lodestar-neighbors).
+It is independent of the GeoGuessr map: any map containing a known panorama can
+use the same row.
 
-Optional private cloud queries are supported for arbitrary maps through the
-exact C-RADIOv4-H World-50K pilot. In Tampermonkey, open the userscript menu and
-choose **Configure C-RADIO cloud** to set, replace, clear, or check the joined
-`wk-….ws-…` proxy token. The token stays in Tampermonkey storage and is sent
-only as a bearer authorization header. Cloud requests are prefetched during
-play and cached locally; known portable maps continue to use their local packs.
+For a panorama outside Lodestar, the static lookup returns no row. If the user
+has configured the private Modal credential, the script sends the panorama ID,
+spawn heading, and requested match count to the C-RADIO service. The service
+embeds the four views and searches the same global corpus. Successful responses
+are cached locally. There is no active browser-ONNX inference fallback.
 
-No companion app, Python server, account, LAN connection, or manual map
-selection is required for local mode. Local learning state remains in the
-browser; this release has no analytics service.
+Use Tampermonkey's **Configure C-RADIO cloud** command to set, replace, clear,
+or inspect the joined `wk-….ws-…` proxy token. The credential stays in
+Tampermonkey storage and is sent only in the request's authorization header.
+Known Lodestar rows never consume Modal inference.
 
-The earlier clustering-family interface and all of its data are preserved at
-the [`family-meta-trainer-v1`](https://github.com/ObsidianArmor1/geoguessr-meta-trainer/tree/family-meta-trainer-v1)
-tag for a future optional add-on. They are not part of the active post-round
-interface or request path.
+## What the review means
+
+- Every displayed point is a visually similar reference panorama, not a claim
+  that the round must be there.
+- All requested matches can be shown, while only the strong similarity core
+  steers the suggested click.
+- The round and guess clouds are independently toggleable. Their overlap shows
+  whether the two places share visual references.
+- The guess anchor is the strongest round match near the guess when one exists;
+  otherwise it is the nearest corpus panorama within the safety radius.
+- Similarity between arbitrary known corpus rows uses a 256-dimensional
+  projected estimate when neither row contains the other in its exact top-300.
+  That estimate is labelled separately from exact neighbor-table similarity.
+
+Regular single-player rounds and private-party Live Challenge result screens
+share the same retrieval and review components.
+
+## Development
+
+```sh
+npm run check
+npm run test:cradio
+npm run test:lodestar
+npm run test:live-challenge
+npm run test:smoke
+```
+
+The version in `package.json`, the userscript metadata header, and the internal
+`USERSCRIPT_VERSION` constant must move together.
+
+The earlier clustering-family interface and its data are preserved at the
+[`family-meta-trainer-v1`](https://github.com/ObsidianArmor1/geoguessr-meta-trainer/tree/family-meta-trainer-v1)
+tag. It is not part of the active request or post-round interface.

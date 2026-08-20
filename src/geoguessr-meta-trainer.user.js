@@ -1,14 +1,12 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.46
+// @version      2.2.0-beta.47
 // @description  Post-round visual similarity for any Street View map, from a precomputed million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
-// @require      https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.webgpu.min.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/f1006b4177886b80a3921ccc27030dd9f3a9721b/src/universal-similarity.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
@@ -43,13 +41,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.1.0-beta.7";
-  // ONNX Runtime's classic browser bundle declares `var ort` in the shared
-  // userscript wrapper. Tampermonkey does not necessarily reflect that lexical
-  // binding onto `globalThis`, while the separately required universal module
-  // resolves dependencies through `globalThis`. Bridge the two explicitly.
-  const browserVisionRuntime = typeof ort !== "undefined" ? ort : globalThis.ort;
-  if (browserVisionRuntime && !globalThis.ort) globalThis.ort = browserVisionRuntime;
+  const USERSCRIPT_VERSION = "2.2.0-beta.47";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -255,7 +247,6 @@
     roundIdentity: null,
     visualExposure: null,
     finalizedExposureKeys: new Set(),
-    universalPrewarmPromise: null,
   };
 
   function readFeedback() {
@@ -421,21 +412,12 @@
       eventState?.datasetKey,
     ].find((value) => typeof value === "string" && value.length);
     if (!datasetKey) return;
-    // The 50k-location core is the largest cold-start cost. Begin downloading
-    // and parsing it when play starts instead of after the guess is submitted.
+    // Legacy map-specific packs can still be warmed while a round is active.
+    // Unknown maps use Lodestar/Modal through prefetchModalForMap instead;
+    // browser inference was removed after retrieval-quality validation failed.
     portableApi.prewarmMap(datasetKey).catch(() => {
-      // On an unseen map, prepare the location-free browser models and static
-      // World pilot corpus. Geographic search still waits for round end.
-      if (!state.universalPrewarmPromise) {
-        const begin = () => portableApi.prewarmUniversal().catch((error) => {
-          console.warn("Meta Trainer: universal corpus prewarm failed", error);
-        }).finally(() => { state.universalPrewarmPromise = null; });
-        state.universalPrewarmPromise = new Promise((resolve) => {
-          const run = () => Promise.resolve(begin()).finally(resolve);
-          if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 5000 });
-          else window.setTimeout(run, 1500);
-        });
-      }
+      // An unknown map has no legacy pack to warm. Its pano prefetch is already
+      // running independently and will use static Lodestar first, Modal second.
     });
   }
 
@@ -469,9 +451,13 @@
   }
 
   async function prefetchModalForMap(panoId, context = {}) {
-    if (!panoId || !cradioClient.configured()) {
+    const packAvailable = Boolean(pageWindow.LodestarPack || window.LodestarPack);
+    if (!panoId || (!cradioClient.configured() && !packAvailable)) {
       return { ok: false, reason: "not-configured" };
     }
+    // The global static table is map-independent. Do not suppress it merely
+    // because this map also has a legacy map-specific pack.
+    if (packAvailable) return prefetchModalRound(panoId, context);
     const sourceMapKey = context.sourceMapKey;
     if (sourceMapKey) {
       const knownMap = await portableApi.isKnownMap(sourceMapKey).catch(() => false);
@@ -521,17 +507,9 @@
       // Decode them opportunistically so opening V remains immediate.
       await warmVisualBoard(board);
     }).catch(() => {
-      // Unknown maps have no precomputed row to fetch. Compute the exact
-      // universal query privately during play; UniversalSimilarity retains the
-      // promise/result, so post-round review reuses it instead of starting the
-      // browser models after the guess. No trainer UI is shown here.
-      if (panoId && !cradioClient.configured()) {
-        portableApi.precomputeUniversalRound(panoId).catch((error) => {
-          console.warn("Meta Trainer: during-round universal analysis failed", error);
-        });
-      } else {
-        warmMapForRound({ mapId: datasetKey });
-      }
+      // Unknown maps have no legacy row. Lodestar/Modal prefetch above is the
+      // only current arbitrary-map retrieval path.
+      warmMapForRound({ mapId: datasetKey });
     });
   }
 
@@ -3961,15 +3939,11 @@
       if (liveRound.location.panoId) params.set("pano_id", liveRound.location.panoId);
       if (Number.isFinite(liveRound.location.lat)) params.set("lat", liveRound.location.lat);
       if (Number.isFinite(liveRound.location.lng)) params.set("lng", liveRound.location.lng);
-      // Preindexed maps use their precomputed row. On any other map, privately
-      // compute and cache the universal query now so the Live Challenge result
-      // screen does not pay browser-inference latency.
+      // Preindexed maps can also warm their legacy row. Unknown maps already
+      // started their Lodestar/Modal prefetch above.
       try {
         await portableApi.prewarmMap(liveRound.mapId);
       } catch (_error) {
-        if (liveRound.location.panoId && !cradioClient.configured()) {
-          await portableApi.precomputeUniversalRound(liveRound.location.panoId);
-        }
         return;
       }
       const review = await request(`/api/neighborhood?${params}`);
@@ -4111,6 +4085,7 @@
     if (Number.isFinite(roundScore)) params.set("round_score", roundScore);
     if (Number.isFinite(roundDistanceM)) params.set("round_distance_m", roundDistanceM);
     const cloudConfigured = cradioClient.configured();
+    const packAvailable = Boolean(pageWindow.LodestarPack || window.LodestarPack);
     const inferredDiagonalKm = Number.isFinite(roundScore) && roundScore > 0 && roundScore < 5000
         && Number.isFinite(roundDistanceM) && roundDistanceM > 0
       ? -10 * (roundDistanceM / 1000) / Math.log(roundScore / 5000)
@@ -4118,8 +4093,8 @@
     const knownMap = datasetKey
       ? await portableApi.isKnownMap(datasetKey).catch(() => false)
       : false;
-    const useCloudReview = cloudConfigured && Boolean(cloudPanoId) && !knownMap;
-    const cloudRequest = useCloudReview
+    const useSimilarityReview = Boolean(cloudPanoId) && (cloudConfigured || packAvailable);
+    const cloudRequest = useSimilarityReview
       ? prefetchModalRound(cloudPanoId, {
         latitude: round.location.lat,
         longitude: round.location.lng,
@@ -4131,9 +4106,13 @@
     // A configured Modal request is single-shot: the endpoint's uncached-call
     // guard makes automatic retries unsafe. Known portable maps retain their
     // fast local path, while arbitrary maps use exact cloud results.
-    const reviewRequest = useCloudReview
+    const reviewRequest = useSimilarityReview
       ? cloudRequest.then((result) => {
         if (!result?.ok || !result.response) {
+          // If a known legacy map contains a panorama that is absent from the
+          // static corpus and Modal is unavailable, its old local pack remains
+          // a safe fallback. Unknown maps have no such fallback.
+          if (knownMap) return criticalRequest(`/api/neighborhood?${params}`);
           const why = [result?.reason, result?.status].filter(Boolean).join(" ");
           throw new Error(why ? `C-RADIO similarity unavailable (${why})` : "C-RADIO similarity unavailable");
         }
@@ -4142,7 +4121,7 @@
       : criticalRequest(`/api/neighborhood?${params}`);
     state.pendingTimer = window.setTimeout(() => {
       if (token === state.requestToken && !state.review) {
-        renderPending(useCloudReview
+        renderPending(useSimilarityReview
           ? "C-RADIO similarity warming…"
           : "Analyzing visual similarity…");
       }
@@ -4185,11 +4164,11 @@
         // so the reason added upstream never reached the screen.
         console.warn("Meta Trainer: cloud review failed", error);
         renderOffline(
-          useCloudReview
+          useSimilarityReview
             ? (error && error.message ? error.message : "C-RADIO similarity unavailable")
             : error.message,
         );
-        if (!useCloudReview) {
+        if (!useSimilarityReview) {
           state.offlineRetryTimer = setTimeout(() => {
             if (token === state.requestToken) handleRoundEnd(eventState);
           }, 650);

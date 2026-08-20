@@ -77,7 +77,7 @@ async function main() {
     calls += 1;
     assert.equal(options.headers.Authorization, "Bearer wk-test-token.ws-test-token");
     assert.equal(options.headers["Content-Type"], "application/json");
-    assert.deepEqual(JSON.parse(options.body), { panoId: queryPano, count: 500 });
+    assert.deepEqual(JSON.parse(options.body), { panoId: queryPano, count: 500, heading: 0 });
     return { status: 200, body: JSON.stringify(rawResponse) };
   };
   const store = storage();
@@ -93,6 +93,15 @@ async function main() {
   assert.equal(first.ok, true);
   assert.equal(second.ok, true);
   assert.equal(first.cached, false);
+
+  let headingBody = null;
+  const headingClient = clientWith(async (options) => {
+    headingBody = JSON.parse(options.body);
+    return { status: 200, body: JSON.stringify(rawResponse) };
+  }, storage());
+  const headingResult = await headingClient.prefetch("heading-pano", { heading: -15 });
+  assert.equal(headingResult.ok, true);
+  assert.equal(headingBody.heading, 345, "query heading is normalized and sent to Modal");
   const cachedClient = clientWith(async () => {
     throw new Error("cache hit must not call transport");
   }, store);
@@ -100,6 +109,37 @@ async function main() {
   assert.equal(cacheHit.ok, true);
   assert.equal(cacheHit.cached, true, "successful cloud responses are cached");
   assert.ok(store.getValue(CACHE_KEY).version >= 1);
+
+  const originalPack = globalThis.LodestarPack;
+  let packQueries = 0;
+  globalThis.LodestarPack = {
+    async query(panoId, count) {
+      packQueries += 1;
+      assert.equal(panoId, "lodestar-pano");
+      assert.equal(count, 300);
+      return {
+        ...rawResponse,
+        panoId,
+        source: "lodestar-static-pack",
+        corpus: "lodestar-1m",
+        corpusSize: 999693,
+        clickCount: 2,
+      };
+    },
+  };
+  let unexpectedCloudCalls = 0;
+  const packOnly = new ModalCradioClient({
+    ...storage(),
+    request: async () => { unexpectedCloudCalls += 1; throw new Error("Modal must not run"); },
+  });
+  const packResult = await packOnly.prefetch("lodestar-pano", { latitude: 49, longitude: 7 });
+  assert.equal(packResult.ok, true, "Lodestar rows work without a Modal credential");
+  assert.equal(packResult.source, "lodestar-static-pack");
+  assert.equal(packResult.response.cradio.corpus, "lodestar-1m");
+  assert.equal(packQueries, 1);
+  assert.equal(unexpectedCloudCalls, 0, "static lookup never consumes inference");
+  if (originalPack === undefined) delete globalThis.LodestarPack;
+  else globalThis.LodestarPack = originalPack;
 
   const missing = new ModalCradioClient({ ...storage(), request });
   assert.deepEqual(await missing.prefetch(queryPano), { ok: false, reason: "missing-credential" });
@@ -110,7 +150,10 @@ async function main() {
 
   for (const [status, reason] of [[401, "unauthorized"], [429, "rate-limited"], [500, "http-error"]]) {
     const failure = clientWith(async () => ({ status, body: "{}" }), storage());
-    assert.deepEqual(await failure.prefetch(`pano-${status}`), { ok: false, reason });
+    const result = await failure.prefetch(`pano-${status}`);
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, reason);
+    assert.equal(result.status, status);
   }
   const timeout = clientWith(async () => {
     const error = new Error("timeout");
@@ -126,8 +169,10 @@ async function main() {
     failedCalls += 1;
     return { status: 429, body: "{}" };
   }, storage());
-  assert.deepEqual(await failedOnce.prefetch("pano-no-retry"), { ok: false, reason: "rate-limited" });
-  assert.deepEqual(await failedOnce.prefetch("pano-no-retry"), { ok: false, reason: "rate-limited" });
+  const failedFirst = await failedOnce.prefetch("pano-no-retry");
+  const failedSecond = await failedOnce.prefetch("pano-no-retry");
+  assert.equal(failedFirst.reason, "rate-limited");
+  assert.equal(failedSecond.reason, "rate-limited");
   assert.equal(failedCalls, 1, "a failed pano is not automatically retried");
 
   // The userscript's request-token guard must discard a late prior-round
