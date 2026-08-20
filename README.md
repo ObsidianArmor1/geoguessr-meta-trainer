@@ -51,9 +51,10 @@ Known Lodestar rows never consume Modal inference.
 global directory. A known pano fetches one small hash-bucket index and one
 self-contained ~8 KB row range, so cold bytes and browser memory no longer grow
 with the corpus. It also carries a lazy static geographic index for guess-side
-comparison. V2 remains disabled until the full public host passes range, parity,
-latency, and real-browser checks; `lodestar-pack.js` keeps V1 as an automatic
-rollback path.
+comparison. The verified public default is the immutable Hugging Face dataset
+[`riot1/lodestar-1m-neighbors-v2`](https://huggingface.co/datasets/riot1/lodestar-1m-neighbors-v2);
+`lodestar-pack.js` keeps V1 as an automatic rollback path, and
+`LodestarPackV2.configure(null)` deliberately disables V2.
 
 ## What the review means
 

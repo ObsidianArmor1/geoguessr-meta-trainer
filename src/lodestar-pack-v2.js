@@ -2,9 +2,11 @@
   "use strict";
 
   // Pack V2 resolves one panorama without loading a corpus-sized directory.
-  // It is deliberately separate from LodestarPack V1 until parity and hosting
-  // benchmarks pass; the userscript can then prefer V2 and retain V1 as a
-  // rollback path without changing any review/UI code.
+  // The public immutable dataset is the default; configure(null) is the
+  // deliberate disable path, and LodestarPack V1 remains the automatic
+  // rollback path if a V2 request fails.
+  const DEFAULT_BASE_URL =
+    "https://huggingface.co/datasets/riot1/lodestar-1m-neighbors-v2/resolve/main";
   const DB_NAME = "lodestar-pack-v2";
   const STORE = "blobs";
   const INDEX_HEADER_BYTES = 12;
@@ -18,7 +20,7 @@
   const MAX_MEMORY_INDEXES = 64;
   const MAX_MEMORY_GEO_TILES = 32;
 
-  let settings = null;
+  let settings = { baseUrl: DEFAULT_BASE_URL };
   let manifestPromise = null;
   const indexCache = new Map();
   const rowCache = new Map();
@@ -26,7 +28,9 @@
   let occupancyPromise = null;
 
   function configure(options) {
-    settings = options ? { ...options } : null;
+    settings = options === undefined
+      ? { baseUrl: DEFAULT_BASE_URL }
+      : (options ? { ...options } : null);
     manifestPromise = null;
     indexCache.clear();
     rowCache.clear();
