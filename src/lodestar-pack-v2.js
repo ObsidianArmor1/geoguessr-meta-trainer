@@ -2,12 +2,17 @@
   "use strict";
 
   // Pack V2 resolves one panorama without loading a corpus-sized directory.
-  // The public immutable dataset is the default; configure(null) is the
+  // The verified 2M dataset is the production default; configure(null) is the
   // deliberate disable path, and LodestarPack V1 remains the automatic
   // rollback path if a V2 request fails.
   const DEFAULT_BASE_URL =
-    "https://huggingface.co/datasets/riot1/lodestar-1m-neighbors-v2/resolve/main";
-  const DB_NAME = "lodestar-pack-v2";
+    "https://huggingface.co/datasets/riot1/lodestar-2m-neighbors-v2/resolve/878a78951f65d7dc7e96dbaa85ee41121d5abcbb";
+  const DEFAULT_REVISION = "878a78951f65d7dc7e96dbaa85ee41121d5abcbb";
+  const DEFAULT_GENERATION = "5a1bbde08350cd12";
+  const DEFAULT_CORPUS = "lodestar-2m";
+  const DEFAULT_CORPUS_ROWS = 1999685;
+  const DEFAULT_NEIGHBORS = 300;
+  const DB_NAME = "lodestar-pack-v2-2m-5a1bbde08350cd12";
   const STORE = "blobs";
   const INDEX_HEADER_BYTES = 12;
   const INDEX_RECORD_BYTES = 32;
@@ -79,6 +84,18 @@
     geoTileCache.clear();
     occupancyPromise = null;
     resetRuntime();
+  }
+
+  function defaultConfig() {
+    return {
+      baseUrl: DEFAULT_BASE_URL,
+      revision: DEFAULT_REVISION,
+      generation: DEFAULT_GENERATION,
+      corpus: DEFAULT_CORPUS,
+      corpusRows: DEFAULT_CORPUS_ROWS,
+      neighborsPerPanorama: DEFAULT_NEIGHBORS,
+      cacheName: DB_NAME,
+    };
   }
 
   function available() {
@@ -203,6 +220,13 @@
         .then((value) => {
           if (value.format !== "lodestar-range-row-pack" || value.version !== 2) {
             throw new Error("Unsupported Lodestar Pack V2 manifest");
+          }
+          if (settings.baseUrl === DEFAULT_BASE_URL
+              && (value.corpus !== DEFAULT_CORPUS
+                || value.generation !== DEFAULT_GENERATION
+                || value.corpusRows !== DEFAULT_CORPUS_ROWS
+                || value.neighborsPerPanorama !== DEFAULT_NEIGHBORS)) {
+            throw new Error("Default Lodestar Pack V2 manifest does not match verified 2M corpus");
           }
           runtime.manifest = "ready";
           runtime.manifestError = null;
@@ -612,7 +636,7 @@
   }
 
   root.LodestarPackV2 = {
-    configure, available, manifest, locate, query, projectedVector, similarityBetween,
+    configure, available, defaultConfig, manifest, locate, query, projectedVector, similarityBetween,
     nearest, haversineKm,
     encodePanoramaId, decodePanoramaId, bucketOf, parseIndex, parseRow,
     adaptiveCount, sphericalClick, half, diagnostics,
