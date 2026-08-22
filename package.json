@@ -1,6 +1,6 @@
 {
   "name": "geoguessr-meta-trainer",
-  "version": "2.2.0-beta.57",
+  "version": "2.2.0-beta.58",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -10,8 +10,9 @@
     "test:lodestar": "node tests/lodestar-pack.js",
     "test:lodestar-v2": "node tests/lodestar-pack-v2.js",
     "test:lodestar-v2-remote": "node tests/remote-lodestar-pack-v2.js",
+    "test:lodestar-activation": "node tests/lodestar-activation.js",
     "benchmark:lodestar-v2": "node --expose-gc tests/benchmark-lodestar-v2.js",
     "test:userscript-contract": "node tests/userscript-contract.js",
-    "test:smoke": "python3 tests/neighbor-change-points.py && node tests/universal-similarity.js && node tests/live-challenge-adapter.js && node tests/lodestar-pack.js && node tests/lodestar-pack-v2.js && node tests/cradio-client.js && node tests/userscript-contract.js && node tests/portable-api-smoke.js data"
+    "test:smoke": "python3 tests/neighbor-change-points.py && node tests/universal-similarity.js && node tests/live-challenge-adapter.js && node tests/lodestar-pack.js && node tests/lodestar-pack-v2.js && node tests/lodestar-activation.js && node tests/cradio-client.js && node tests/userscript-contract.js && node tests/portable-api-smoke.js data"
   }
 }

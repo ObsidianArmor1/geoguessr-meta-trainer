@@ -17,7 +17,7 @@ four-direction Street View previews. Settings persist between rounds.
 
 ## Current retrieval architecture
 
-The reference corpus is **Lodestar 1.1**: 999,693 validated, embedded Street
+The reference corpus is **Lodestar 2.0**: 1,999,685 validated, embedded Street
 View panoramas represented by C-RADIOv4-H.
 
 For a panorama already in Lodestar, the userscript performs no inference. It:
@@ -69,7 +69,9 @@ global directory. A known pano fetches one small hash-bucket index and one
 self-contained ~8 KB row range, so cold bytes and browser memory no longer grow
 with the corpus. It also carries a lazy static geographic index for guess-side
 comparison. The verified public default is the immutable Hugging Face dataset
-[`riot1/lodestar-1m-neighbors-v2`](https://huggingface.co/datasets/riot1/lodestar-1m-neighbors-v2);
+[`riot1/lodestar-2m-neighbors-v2`](https://huggingface.co/datasets/riot1/lodestar-2m-neighbors-v2),
+pinned to revision `878a78951f65d7dc7e96dbaa85ee41121d5abcbb` and manifest generation
+`5a1bbde08350cd12`; it contains 1,999,685 rows with 300 neighbors per row.
 `lodestar-pack.js` keeps V1 as an automatic rollback path, and
 `LodestarPackV2.configure(null)` deliberately disables V2.
 
