@@ -16,8 +16,8 @@ if (!fs.existsSync(path.join(packPath, "manifest.json"))) {
 require("../src/lodestar-pack-v2.js");
 const pack = globalThis.LodestarPackV2;
 const manifest = JSON.parse(fs.readFileSync(path.join(packPath, "manifest.json")));
-assert.equal(manifest.corpus, "lodestar-2m");
-assert.equal(manifest.generation, "5a1bbde08350cd12");
+assert.equal(manifest.corpus, "lodestar-balanced-2m");
+assert.equal(manifest.generation, "b6f99168d869873c");
 assert.equal(manifest.corpusRows, 1999685);
 assert.equal(manifest.neighborsPerPanorama, 300);
 const inventory = JSON.parse(fs.readFileSync(path.join(packPath, manifest.inventory)));
@@ -82,6 +82,8 @@ function assertSameResult(actual, expected, row) {
 
 (async () => {
   const localResults = await querySet(localTransport, packPath);
+  assert.equal((await pack.projectedVector(samplePanos[0]))?.length, 256,
+    "local browser projection payload is compatible");
   const statuses = [];
   let transferred = 0;
   const remoteResults = await querySet(async (url, options = {}) => {
@@ -101,6 +103,8 @@ function assertSameResult(actual, expected, row) {
     });
     return { buffer, status: response.status, contentRange };
   }, baseUrl);
+  assert.equal((await pack.projectedVector(samplePanos[0]))?.length, 256,
+    "remote browser projection payload is compatible");
 
   for (let index = 0; index < sampleRows.length; index += 1) {
     assertSameResult(remoteResults[index], localResults[index], sampleRows[index]);

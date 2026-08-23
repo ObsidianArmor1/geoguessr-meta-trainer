@@ -6,13 +6,13 @@
   // deliberate disable path, and LodestarPack V1 remains the automatic
   // rollback path if a V2 request fails.
   const DEFAULT_BASE_URL =
-    "https://huggingface.co/datasets/riot1/lodestar-2m-neighbors-v2/resolve/878a78951f65d7dc7e96dbaa85ee41121d5abcbb";
-  const DEFAULT_REVISION = "878a78951f65d7dc7e96dbaa85ee41121d5abcbb";
-  const DEFAULT_GENERATION = "5a1bbde08350cd12";
-  const DEFAULT_CORPUS = "lodestar-2m";
+    "https://huggingface.co/datasets/riot1/lodestar-balanced-2m-neighbors-v2/resolve/362e0933a897fff88a54107c6aabf20d18aaa0f4";
+  const DEFAULT_REVISION = "362e0933a897fff88a54107c6aabf20d18aaa0f4";
+  const DEFAULT_GENERATION = "b6f99168d869873c";
+  const DEFAULT_CORPUS = "lodestar-balanced-2m";
   const DEFAULT_CORPUS_ROWS = 1999685;
   const DEFAULT_NEIGHBORS = 300;
-  const DB_NAME = "lodestar-pack-v2-2m-5a1bbde08350cd12";
+  const DB_NAME = "lodestar-pack-v2-balanced-2m-b6f99168d869873c";
   const STORE = "blobs";
   const INDEX_HEADER_BYTES = 12;
   const INDEX_RECORD_BYTES = 32;

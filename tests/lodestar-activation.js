@@ -11,10 +11,10 @@ const source = fs.readFileSync(path.join(__dirname, "../src/lodestar-pack-v2.js"
 const userscript = fs.readFileSync(path.join(__dirname, "../src/geoguessr-meta-trainer.user.js"), "utf8");
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8"));
 const expected = {
-  baseUrl: "https://huggingface.co/datasets/riot1/lodestar-2m-neighbors-v2/resolve/878a78951f65d7dc7e96dbaa85ee41121d5abcbb",
-  revision: "878a78951f65d7dc7e96dbaa85ee41121d5abcbb",
-  generation: "5a1bbde08350cd12",
-  corpus: "lodestar-2m",
+  baseUrl: "https://huggingface.co/datasets/riot1/lodestar-balanced-2m-neighbors-v2/resolve/362e0933a897fff88a54107c6aabf20d18aaa0f4",
+  revision: "362e0933a897fff88a54107c6aabf20d18aaa0f4",
+  generation: "b6f99168d869873c",
+  corpus: "lodestar-balanced-2m",
   corpusRows: 1999685,
   neighborsPerPanorama: 300,
 };
@@ -23,11 +23,15 @@ require("../src/lodestar-pack-v2.js");
 const v2 = globalThis.LodestarPackV2;
 assert.deepEqual(v2.defaultConfig(), {
   ...expected,
-  cacheName: "lodestar-pack-v2-2m-5a1bbde08350cd12",
+  cacheName: "lodestar-pack-v2-balanced-2m-b6f99168d869873c",
 });
-assert.equal(pkg.version, "2.2.0-beta.58");
-assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.58$/m);
-assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.58";/);
+assert.equal(pkg.version, "2.2.0-beta.59");
+assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.59$/m);
+assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.59";/);
+assert.match(expected.baseUrl, /^https:\/\/huggingface\.co\/datasets\/riot1\/lodestar-balanced-2m-neighbors-v2\/resolve\/[a-f0-9]{40}$/,
+  "default source is a public immutable Hugging Face revision");
+assert.doesNotMatch(expected.baseUrl, /(?:hf_|wk-)[A-Za-z0-9_-]{20,}/,
+  "public source URL has no credential-like token");
 assert.doesNotMatch(`${source}\n${userscript}`, /(?:hf_|wk-)[A-Za-z0-9_-]{20,}/,
   "no credential-like token may be committed");
 
@@ -48,6 +52,18 @@ v2.configure({ baseUrl: expected.baseUrl, manifest: verifiedManifest });
     manifest: { ...verifiedManifest, corpusRows: 999693 },
   });
   await assert.rejects(v2.manifest(), /does not match verified 2M corpus/);
+  v2.configure({
+    baseUrl: expected.baseUrl,
+    manifest: { ...verifiedManifest, generation: "5a1bbde08350cd12" },
+  });
+  await assert.rejects(v2.manifest(), /does not match verified 2M corpus/,
+    "stale skewed-pack generation is rejected");
+  v2.configure({
+    baseUrl: expected.baseUrl,
+    manifest: { ...verifiedManifest, corpus: "lodestar-2m" },
+  });
+  await assert.rejects(v2.manifest(), /does not match verified 2M corpus/,
+    "stale skewed-pack corpus is rejected");
   v2.configure(null);
   assert.equal(v2.available(), false, "configure(null) deliberately disables V2");
   await assert.rejects(v2.manifest(), /not configured/);
