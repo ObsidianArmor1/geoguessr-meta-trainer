@@ -70,12 +70,18 @@ assert.match(source, /if \(state\.roundRequestKey === requestKey && state\.round
   "the API fallback and event framework share a quality-aware deduplication gate");
 assert.doesNotMatch(source, /if \(state\.liveChallengeResultVisible\) clearRound\(\)/,
   "a transient Live Challenge result subtree must not tear down completed review state");
-assert.match(source, /liveChallengeResultMounted\(\) \|\| frameworkEnded/,
-  "the Live Challenge API fallback is not wholly dependent on a hashed result selector");
+assert.doesNotMatch(source, /frameworkEnded/,
+  "the single-player event framework's default state must not impersonate a Live result");
+assert.match(source, /liveChallengeAdapter\.lifecycle\(data, profileId\)/,
+  "Live Challenge derives gameplay/result phase from its authenticated payload");
+assert.match(source, /if \(apiPlaying \|\| \(!apiResult && !mounted\)\)/,
+  "an advancing Live round clears the full post-round interface");
+assert.match(source, /window\.setInterval\(queueCheck, 1000\)/,
+  "Live round transitions have a bounded fallback when GeoGuessr emits no usable event");
 assert.match(source, /function clearCompletedReviewForActiveRound\(roundNumber, locationValue\)/,
   "an authoritative active-round identity clears stale post-round recommendations");
-assert.match(source, /clearCompletedReviewForActiveRound\(liveRound\.roundNumber, liveRound\.location\)/,
-  "Live Challenge clears stale review state even when its round_start event is absent");
+assert.match(source, /if \(state\.review\) clearRound\(\);[\s\S]{0,300}const activeRound = liveState\.activeRound/,
+  "Live Challenge clears its entire completed review before warming the active round");
 assert.match(source, /clearCompletedReviewForActiveRound\(roundNumber, location\)/,
   "raw standard round data also provides a missed-round_start safety net");
 assert.match(source, /function discoverReactResultMaps\(\)/,

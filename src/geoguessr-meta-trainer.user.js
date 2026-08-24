@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.62
+// @version      2.2.0-beta.63
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.63
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.62";
+  const USERSCRIPT_VERSION = "2.2.0-beta.63";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -4376,7 +4376,7 @@
     return liveChallengeAdapter.normalizeRound(data, challengeId, profileId);
   }
 
-  async function fetchLiveChallengeRound(challengeId) {
+  async function fetchLiveChallengeState(challengeId) {
     const dataPromise = pageWindow.fetch(
       `https://game-server.geoguessr.com/api/live-challenge/${encodeURIComponent(challengeId)}`,
       { method: "GET", credentials: "include" }
@@ -4388,60 +4388,13 @@
       dataPromise,
       liveChallengeProfileId(),
     ]);
-    return normalizedLiveChallengeRound(data, challengeId, profileId);
-  }
-
-  async function prewarmLiveChallengeRound(challengeId) {
-    try {
-      const response = await pageWindow.fetch(
-        `https://game-server.geoguessr.com/api/live-challenge/${encodeURIComponent(challengeId)}`,
-        { method: "GET", credentials: "include" },
-      );
-      if (!response.ok) return null;
-      const liveRound = liveChallengeAdapter.normalizeActiveRound(
-        await response.json(), challengeId,
-      );
-      if (!liveRound?.location?.panoId) return null;
-      clearCompletedReviewForActiveRound(liveRound.roundNumber, liveRound.location);
-      prefetchModalForMap(liveRound.location.panoId, {
-        latitude: liveRound.location.lat,
-        longitude: liveRound.location.lng,
-        sourceMapKey: liveRound.mapId,
-        datasetKey: "balanced-world-50k",
-      });
-      if (!liveRound.mapId) return liveRound;
-      const key = `live:${liveRound.roundKey}:${liveRound.location.panoId || "coordinate"}`;
-      if (prewarmedRoundKeys.has(key)) return liveRound;
-      prewarmedRoundKeys.add(key);
-      if (prewarmedRoundKeys.size > 30) {
-        prewarmedRoundKeys.delete(prewarmedRoundKeys.values().next().value);
-      }
-      warmMapForRound({ mapId: liveRound.mapId });
-      const params = new URLSearchParams({ map_key: liveRound.mapId });
-      if (liveRound.location.panoId) params.set("pano_id", liveRound.location.panoId);
-      if (Number.isFinite(liveRound.location.lat)) params.set("lat", liveRound.location.lat);
-      if (Number.isFinite(liveRound.location.lng)) params.set("lng", liveRound.location.lng);
-      // Preindexed maps can also warm their legacy row. Unknown maps already
-      // started their Lodestar/Modal prefetch above.
-      try {
-        await portableApi.prewarmMap(liveRound.mapId);
-      } catch (_error) {
-        return liveRound;
-      }
-      const review = await request(`/api/neighborhood?${params}`);
-      if (!review?.matched) return liveRound;
-      const dataset = encodeURIComponent(review.datasetKey);
-      const mapIndex = review.location.mapIndex;
-      const [, board] = await Promise.all([
-        request(`/api/neighborhood/${mapIndex}?dataset=${dataset}`),
-        request(`/api/visual-board/${mapIndex}?dataset=${dataset}`),
-      ]);
-      await warmVisualBoard(board);
-      return liveRound;
-    } catch (_error) {
-      // This path is cache-only. The post-round request remains authoritative.
-      return null;
-    }
+    return {
+      data,
+      profileId,
+      lifecycle: liveChallengeAdapter.lifecycle(data, profileId),
+      round: normalizedLiveChallengeRound(data, challengeId, profileId),
+      activeRound: liveChallengeAdapter.normalizeActiveRound(data, challengeId),
+    };
   }
 
   function liveChallengeResultMounted() {
@@ -4452,10 +4405,7 @@
     let trackedChallenge = null;
     let checkQueued = false;
     let lookupInFlight = false;
-    let prewarmInFlight = false;
-    let lastPrewarmAttemptAt = 0;
     let lastPrewarmedRoundKey = "";
-    let fallbackPrewarmTimer = 0;
     let queueCheck = () => {};
 
     const trackResource = (url) => {
@@ -4505,49 +4455,48 @@
       }
     }
 
-    const prewarmActiveRound = async (challengeId) => {
-      const now = Date.now();
-      if (prewarmInFlight || now - lastPrewarmAttemptAt < 400) return;
-      lastPrewarmAttemptAt = now;
-      prewarmInFlight = true;
-      try {
-        const round = await prewarmLiveChallengeRound(challengeId);
-        if (round?.roundKey) lastPrewarmedRoundKey = round.roundKey;
-      } finally {
-        prewarmInFlight = false;
-      }
-    };
-
     const checkResult = async () => {
       checkQueued = false;
       const challengeId = liveChallengeIdForPage(trackedChallenge);
-      const frameworkEnded = pageWindow.GeoGuessrEventFramework?.state?.round_in_progress === false;
-      const mounted = Boolean(challengeId) && (liveChallengeResultMounted() || frameworkEnded);
-      if (!mounted) {
-        // Result subtrees are transient in Live Challenge and can disappear
-        // during ordinary React rerenders. A missing selector must never tear
-        // down a completed review. The authoritative round_start event owns
-        // cleanup, exactly as it does in single player.
-        state.liveChallengeResultVisible = false;
-        state.liveChallengePendingKey = "";
-        if (challengeId) {
-          prewarmActiveRound(challengeId);
-          // Party state can advance just after the old result subtree vanishes.
-          // One bounded fallback catches that transition without polling for
-          // the entire round; real API requests also retrigger queueCheck.
-          window.clearTimeout(fallbackPrewarmTimer);
-          fallbackPrewarmTimer = window.setTimeout(() => {
-            if (!state.liveChallengeResultVisible) prewarmActiveRound(challengeId);
-          }, 700);
-        }
-        return;
-      }
-      window.clearTimeout(fallbackPrewarmTimer);
-      state.liveChallengeResultVisible = true;
+      if (!challengeId) return;
       if (lookupInFlight) return;
       lookupInFlight = true;
       try {
-        const liveRound = await fetchLiveChallengeRound(challengeId);
+        const liveState = await fetchLiveChallengeState(challengeId);
+        const mounted = liveChallengeResultMounted();
+        const apiResult = liveState.lifecycle.phase === "result";
+        const apiPlaying = liveState.lifecycle.guessedRound > 0
+          && liveState.lifecycle.guessedRound < liveState.lifecycle.announcedRound;
+        state.diagnostics.liveChallenge = {
+          challengeId,
+          announcedRound: liveState.lifecycle.announcedRound,
+          guessedRound: liveState.lifecycle.guessedRound,
+          phase: apiResult ? "result" : apiPlaying ? "playing" : "unknown",
+          visibleResult: mounted,
+          hasProfileId: Boolean(liveState.profileId),
+          at: new Date().toISOString(),
+        };
+        if (apiPlaying || (!apiResult && !mounted)) {
+          state.liveChallengeResultVisible = false;
+          state.liveChallengePendingKey = "";
+          if (state.review) clearRound();
+          const activeRound = liveState.activeRound;
+          if (activeRound?.location) {
+            if (activeRound.location.panoId) {
+              prefetchModalForMap(activeRound.location.panoId, {
+                latitude: activeRound.location.lat,
+                longitude: activeRound.location.lng,
+                sourceMapKey: activeRound.mapId,
+                datasetKey: "balanced-world-50k",
+              });
+            }
+            warmMapForRound({ mapId: activeRound.mapId });
+            lastPrewarmedRoundKey = activeRound.roundKey;
+          }
+          return;
+        }
+        state.liveChallengeResultVisible = true;
+        const liveRound = liveState.round;
         if (!liveRound) return;
         if (liveRound.roundKey !== lastPrewarmedRoundKey) {
           // If the active-round warm missed, the authoritative result fetch is
@@ -4591,6 +4540,7 @@
         attributeFilter: ["class", "data-qa", "data-testid"],
       });
       queueCheck();
+      window.setInterval(queueCheck, 1000);
     };
     if (document.body) begin();
     else document.addEventListener("DOMContentLoaded", begin, { once: true });

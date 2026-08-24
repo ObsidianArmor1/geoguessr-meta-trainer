@@ -94,9 +94,66 @@ for (const selector of adapter.RESULT_SELECTORS) {
   }), true, `${selector} mounts a post-round result`);
 }
 assert.equal(adapter.resultMounted({ querySelector() { return null; } }), false);
+assert.equal(adapter.resultMounted({
+  querySelectorAll() {
+    return [{ isConnected: true, getBoundingClientRect: () => ({ width: 0, height: 0 }), getClientRects: () => [] }];
+  },
+}), false, "a hidden result subtree does not keep the review alive during gameplay");
+assert.equal(adapter.resultMounted({
+  querySelectorAll() {
+    return [{ isConnected: true, getBoundingClientRect: () => ({ width: 750, height: 350 }) }];
+  },
+}), true, "a visible Live Challenge result map enables the fallback");
 
 assertFixture("public");
 assertFixture("party");
+
+const completedParty = fixture("party");
+assert.deepEqual(adapter.lifecycle(completedParty.payload, "party-player"), {
+  announcedRound: 3,
+  guessedRound: 3,
+  phase: "result",
+});
+const playingParty = structuredClone(completedParty.payload);
+playingParty.players[1].roundResults.pop();
+assert.deepEqual(adapter.lifecycle(playingParty, "party-player"), {
+  announcedRound: 3,
+  guessedRound: 2,
+  phase: "playing",
+});
+
+const keyedPlayerPayload = {
+  currentRoundNumber: 1,
+  rounds: [{ location: { panoId: "nested-guess-pano", lat: 20, lng: 30 } }],
+  guessesByPlayer: {
+    "party-player": [{ roundNumber: 1, answer: { position: { latitude: 40, longitude: -70 } } }],
+  },
+};
+assert.deepEqual(
+  adapter.normalizeRound(keyedPlayerPayload, "keyed", "party-player").playerGuess,
+  { lat: 40, lng: -70 },
+  "profile-keyed nested answer positions recover the player's own guess",
+);
+
+const indexedGuessesPayload = {
+  currentRoundNumber: 3,
+  rounds: [1, 2, 3].map((number) => ({
+    location: { panoId: `indexed-${number}`, lat: number, lng: number },
+  })),
+  players: [{
+    id: "party-player",
+    guesses: [
+      { position: { lat: 10, lng: 11 } },
+      { position: { lat: 20, lng: 21 } },
+      { position: { lat: 30, lng: 31 } },
+    ],
+  }],
+};
+assert.deepEqual(
+  adapter.normalizeRound(indexedGuessesPayload, "indexed", "party-player").playerGuess,
+  { lat: 30, lng: 31 },
+  "profile guess arrays use their round index when entries omit roundNumber",
+);
 
 const party = fixture("party");
 const noProfile = adapter.normalizeRound(party.payload, "party-game", null);
