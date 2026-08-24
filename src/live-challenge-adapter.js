@@ -59,11 +59,23 @@
   }
 
   function coordinates(value) {
-    const latitude = Number(value?.lat ?? value?.latitude);
-    const longitude = Number(value?.lng ?? value?.longitude ?? value?.lon);
-    return Number.isFinite(latitude) && Number.isFinite(longitude)
-      ? { lat: latitude, lng: longitude }
-      : null;
+    const candidates = [
+      value,
+      value?.position,
+      value?.guess,
+      value?.answer,
+      value?.pin,
+      value?.guessLocation,
+      value?.coordinates,
+    ];
+    for (const candidate of candidates) {
+      const latitude = Number(candidate?.lat ?? candidate?.latitude);
+      const longitude = Number(candidate?.lng ?? candidate?.longitude ?? candidate?.lon);
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        return { lat: latitude, lng: longitude };
+      }
+    }
+    return null;
   }
 
   function scalar(value) {
@@ -89,8 +101,9 @@
   }
 
   function profileId(profile) {
-    const value = profile?.user?.id ?? profile?.id ?? profile?.userId
-      ?? profile?.profileId ?? profile?.player?.id;
+    const value = profile?.user?.id ?? profile?.user?.userId ?? profile?.id ?? profile?.userId
+      ?? profile?.profileId ?? profile?.profile?.id ?? profile?.player?.id
+      ?? profile?.player?.playerId;
     return value == null ? null : String(value);
   }
 
@@ -136,15 +149,20 @@
   }
 
   function belongsToProfile(value, wantedProfileId) {
-    if (!wantedProfileId || !value || typeof value !== "object") return false;
+    if (!value || typeof value !== "object") return false;
+    if (value.isCurrentUser === true || value.isMe === true || value.me === true) return true;
+    if (!wantedProfileId) return false;
     const candidates = [
       value.id,
       value.userId,
       value.playerId,
       value.profileId,
+      value.accountId,
       value.user?.id,
+      value.user?.userId,
       value.profile?.id,
       value.player?.id,
+      value.player?.playerId,
     ];
     return candidates.some((item) => item != null && String(item) === String(wantedProfileId));
   }
@@ -169,8 +187,6 @@
       const result = coordinates(value);
       if (result) return result;
     }
-    if (!wantedProfileId) return null;
-
     const candidates = [];
     const seen = new Set();
     const visit = (value, path, inheritedProfile, inheritedRound, depth) => {
@@ -181,6 +197,15 @@
       const pathText = path.join(".").toLowerCase();
       const itemRound = statedRound(value);
       const effectiveRound = itemRound ?? inheritedRound;
+      const collectionName = String(path[path.length - 1] || "").toLowerCase();
+      if (
+        inProfile
+        && Array.isArray(value)
+        && /(guesses|answers|roundresults|results)/.test(collectionName)
+      ) {
+        const indexed = coordinates(value[number - 1]);
+        if (indexed) candidates.push({ result: indexed, depth: -100 });
+      }
       if (
         inProfile
         && result
@@ -191,12 +216,36 @@
         candidates.push({ result, depth });
       }
       for (const [key, item] of Object.entries(value)) {
-        visit(item, [...path, key], inProfile, effectiveRound, depth + 1);
+        visit(
+          item,
+          [...path, key],
+          inProfile || String(key) === String(wantedProfileId),
+          effectiveRound,
+          depth + 1,
+        );
       }
     };
     visit(data, [], false, null, 0);
     candidates.sort((left, right) => left.depth - right.depth);
     return candidates[0]?.result || null;
+  }
+
+  function latestGuessedRoundNumber(data, wantedProfileId = null) {
+    const rounds = Array.isArray(data?.rounds) ? data.rounds : [];
+    for (let number = rounds.length; number >= 1; number -= 1) {
+      if (playerGuess(data, roundAt(data, number), number, wantedProfileId)) return number;
+    }
+    return 0;
+  }
+
+  function lifecycle(data, wantedProfileId = null) {
+    const announcedRound = announcedRoundNumber(data);
+    const guessedRound = latestGuessedRoundNumber(data, wantedProfileId);
+    return {
+      announcedRound,
+      guessedRound,
+      phase: guessedRound >= announcedRound ? "result" : "playing",
+    };
   }
 
   function numberFrom(value, paths) {
@@ -299,7 +348,16 @@
   }
 
   function resultMounted(rootNode) {
-    return Boolean(rootNode?.querySelector?.(RESULT_SELECTORS.join(",")));
+    const selector = RESULT_SELECTORS.join(",");
+    if (typeof rootNode?.querySelectorAll !== "function") {
+      return Boolean(rootNode?.querySelector?.(selector));
+    }
+    return Array.from(rootNode.querySelectorAll(selector)).some((element) => {
+      if (!element?.isConnected) return false;
+      const rect = element.getBoundingClientRect?.();
+      if (rect && rect.width > 80 && rect.height > 60) return true;
+      return Boolean(element.getClientRects?.().length);
+    });
   }
 
   const api = {
@@ -316,6 +374,8 @@
     profileId,
     playerGuess,
     completedRoundNumber,
+    latestGuessedRoundNumber,
+    lifecycle,
     normalizeRound,
     normalizeActiveRound,
     buildEventState,
