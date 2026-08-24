@@ -101,6 +101,20 @@ assertFixture("party");
 const party = fixture("party");
 const noProfile = adapter.normalizeRound(party.payload, "party-game", null);
 assert.equal(noProfile.playerGuess, null, "another player's guess is never used without identity");
+assert.equal(noProfile.roundNumber, 3,
+  "without identity the result fallback preserves GeoGuessr's announced round");
+
+const activePayload = {
+  currentRoundNumber: 2,
+  rounds: [
+    { location: { panoId: "completed", lat: 1, lng: 2 }, playerGuess: { lat: 3, lng: 4 } },
+    { location: { panoId: "active", lat: 5, lng: 6 } },
+  ],
+};
+assert.equal(adapter.normalizeRound(activePayload, "game", null).location.panoId, "completed",
+  "a submitted guess identifies the completed round during a transition");
+assert.equal(adapter.normalizeActiveRound(activePayload, "game").location.panoId, "active",
+  "gameplay prefetch still warms the active question");
 
 // This is the exact input contract consumed by the ordinary handleRoundEnd
 // path. Live Challenge must not grow a reduced, feature-specific review path.
