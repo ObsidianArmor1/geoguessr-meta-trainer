@@ -88,6 +88,20 @@ assert.match(source, /function discoverReactResultMaps\(\)/,
   "result maps missed by the early Google Maps hook have a React-instance fallback");
 assert.match(source, /function trackMap\(map\)/,
   "single-player and Live Challenge maps share overlay, hover, and guess-prefetch wiring");
+assert.match(source, /captureSubmittedGuess\(url, init\?\.body\)/,
+  "Live Challenge captures the user's authoritative outgoing fetch guess");
+assert.match(source, /captureSubmittedGuess\(this\.__OMT_LIVE_URL, body\)/,
+  "Live Challenge captures the user's authoritative outgoing XHR guess");
+assert.match(source, /liveChallengeAdapter\.matchingGuess\(data, lifecycle\.announcedRound, state\.pendingPlayerGuess\)/,
+  "a submitted pin identifies the user's result even when GeoGuessr profile IDs drift");
+assert.match(source, /round\.playerGuess = pendingMatch/,
+  "the recovered Live Challenge guess reaches the shared round-end pipeline");
+assert.match(source, /\|\| state\.pendingPlayerGuess;/,
+  "the shared review retains a final submitted-pin fallback for blue comparisons");
+assert.match(source, /if \(!state\.root\?\.isConnected\) render\(\)/,
+  "a GeoGuessr Live subtree replacement remounts an already-built review");
+assert.match(source, /state\.roundRequestQuality = -1;/,
+  "a completed Live lookup that produced no interface remains retryable");
 assert.match(source, /\.omt-board-current > img,\.omt-board-match > img \{[^}]*object-fit:cover/,
   "single-direction V-board thumbnails fill their cells instead of becoming a letterboxed square");
 assert.match(source, /image\.src = boardThumbnail \? resolved : fitViewToBox/,

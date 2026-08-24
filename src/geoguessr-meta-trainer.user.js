@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.63
+// @version      2.2.0-beta.64
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.63
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.64
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.63";
+  const USERSCRIPT_VERSION = "2.2.0-beta.64";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -190,6 +190,7 @@
     feedback: readFeedback(),
     round: null,
     playerGuess: null,
+    pendingPlayerGuess: null,
     requestToken: 0,
     root: null,
     shadow: null,
@@ -3013,6 +3014,7 @@
       const latitude = event?.latLng?.lat?.();
       const longitude = event?.latLng?.lng?.();
       if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        if (!state.review) state.pendingPlayerGuess = { lat: latitude, lng: longitude };
         prefetchGuessSide(latitude, longitude);
       }
     });
@@ -4137,6 +4139,7 @@
     state.visualBoardModifierCleanup = null;
     state.round = null;
     state.playerGuess = null;
+    state.pendingPlayerGuess = null;
     state.roundIdentity = null;
     state.lastRoundEventState = null;
     state.roundRequestKey = "";
@@ -4388,12 +4391,21 @@
       dataPromise,
       liveChallengeProfileId(),
     ]);
+    const lifecycle = liveChallengeAdapter.lifecycle(data, profileId);
+    const pendingMatch = state.pendingPlayerGuess
+      ? liveChallengeAdapter.matchingGuess(data, lifecycle.announcedRound, state.pendingPlayerGuess)
+      : null;
+    const round = normalizedLiveChallengeRound(data, challengeId, profileId);
+    if (round && pendingMatch) round.playerGuess = pendingMatch;
     return {
       data,
       profileId,
-      lifecycle: liveChallengeAdapter.lifecycle(data, profileId),
-      round: normalizedLiveChallengeRound(data, challengeId, profileId),
+      lifecycle: pendingMatch
+        ? { ...lifecycle, guessedRound: lifecycle.announcedRound, phase: "result" }
+        : lifecycle,
+      round,
       activeRound: liveChallengeAdapter.normalizeActiveRound(data, challengeId),
+      pendingMatch,
     };
   }
 
@@ -4407,6 +4419,16 @@
     let lookupInFlight = false;
     let lastPrewarmedRoundKey = "";
     let queueCheck = () => {};
+
+    const captureSubmittedGuess = (url, body) => {
+      if (!liveChallengeIdFromUrl(url)) return;
+      const guess = liveChallengeAdapter.submittedGuess(body);
+      if (!guess) return;
+      state.pendingPlayerGuess = guess;
+      state.guessPrefetchKey = "";
+      prefetchGuessSide(guess.lat, guess.lng);
+      queueCheck();
+    };
 
     const trackResource = (url) => {
       if (!PARTY_LOBBY_PATH.test(location.pathname)) return;
@@ -4434,8 +4456,15 @@
       if (typeof originalFetch === "function") {
         try {
           pageWindow.fetch = function (input, init) {
-            trackResource(typeof input === "string" ? input : input?.url);
-            return originalFetch.call(this, input, init);
+            const url = typeof input === "string" ? input : input?.url;
+            trackResource(url);
+            captureSubmittedGuess(url, init?.body);
+            if (!init?.body && typeof input?.clone === "function") {
+              input.clone().text().then((body) => captureSubmittedGuess(url, body)).catch(() => {});
+            }
+            const request = originalFetch.call(this, input, init);
+            request.finally(queueCheck).catch(() => {});
+            return request;
           };
         } catch (_error) {
           // PerformanceObserver remains available when a browser locks fetch.
@@ -4446,9 +4475,19 @@
         const originalOpen = xhr.open;
         try {
           xhr.open = function (method, url, ...args) {
+            this.__OMT_LIVE_URL = url;
             trackResource(url);
             return originalOpen.call(this, method, url, ...args);
           };
+          const originalSend = xhr.send;
+          if (originalSend) {
+            xhr.send = function (body) {
+              captureSubmittedGuess(this.__OMT_LIVE_URL, body);
+              const result = originalSend.call(this, body);
+              this.addEventListener?.("loadend", queueCheck, { once: true });
+              return result;
+            };
+          }
         } catch (_error) {
           // PerformanceObserver remains available when XHR is non-writable.
         }
@@ -4474,6 +4513,8 @@
           phase: apiResult ? "result" : apiPlaying ? "playing" : "unknown",
           visibleResult: mounted,
           hasProfileId: Boolean(liveState.profileId),
+          hasPendingGuess: Boolean(state.pendingPlayerGuess),
+          matchedPendingGuess: Boolean(liveState.pendingMatch),
           at: new Date().toISOString(),
         };
         if (apiPlaying || (!apiResult && !mounted)) {
@@ -4509,10 +4550,24 @@
           });
           lastPrewarmedRoundKey = liveRound.roundKey;
         }
-        if (
-          liveRound.roundKey === state.liveChallengeLastRoundKey
-          || liveRound.roundKey === state.liveChallengePendingKey
-        ) return;
+        if (liveRound.roundKey === state.liveChallengePendingKey) return;
+        if (liveRound.roundKey === state.liveChallengeLastRoundKey && state.review) {
+          // GeoGuessr can replace the entire Live result subtree without a new
+          // round. Reattach the trainer and repaint its overlays rather than
+          // treating the already-processed round as permanently finished.
+          if (!state.root?.isConnected) render();
+          if (state.overlays.length === 0
+              && (state.showVisualNeighbors || state.showGuessNeighbors)) {
+            showMetaOnMap(false);
+          }
+          return;
+        }
+        if (liveRound.roundKey === state.liveChallengeLastRoundKey) {
+          // A completed lookup that left no review is recoverable. Permit the
+          // shared pipeline to rebuild it on the next authoritative poll.
+          state.roundRequestKey = "";
+          state.roundRequestQuality = -1;
+        }
         state.liveChallengePendingKey = liveRound.roundKey;
         await handleRoundEnd(liveChallengeAdapter.buildEventState(liveRound, challengeId));
         state.liveChallengeLastRoundKey = liveRound.roundKey;
@@ -4579,7 +4634,8 @@
     state.roundRequestQuality = requestQuality;
     state.lastRoundEventState = eventState;
     state.round = rounds.length;
-    const rawGuess = round.player_guess || round.playerGuess || round.guess;
+    const rawGuess = round.player_guess || round.playerGuess || round.guess
+      || state.pendingPlayerGuess;
     const guessLat = Number(rawGuess?.lat ?? rawGuess?.latitude);
     const guessLng = Number(rawGuess?.lng ?? rawGuess?.longitude);
     state.playerGuess = Number.isFinite(guessLat) && Number.isFinite(guessLng)

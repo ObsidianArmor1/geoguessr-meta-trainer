@@ -63,6 +63,11 @@ assert.equal(
   adapter.challengeIdFromUrl("https://game-server.geoguessr.com/api/live-challenge/party-game"),
   "party-game",
 );
+assert.equal(
+  adapter.challengeIdFromUrl("https://game-server.geoguessr.com/api/live-challenge/party-game/guess"),
+  "party-game",
+  "Live Challenge submission subroutes retain their challenge identity",
+);
 assert.equal(adapter.challengeIdForPage(
   "/party/lobby/ROOM",
   [
@@ -154,6 +159,35 @@ assert.deepEqual(
   { lat: 30, lng: 31 },
   "profile guess arrays use their round index when entries omit roundNumber",
 );
+
+const unidentifiedPlayers = {
+  currentRoundNumber: 2,
+  rounds: [
+    { location: { panoId: "old", lat: 1, lng: 2 } },
+    { location: { panoId: "current", lat: 3, lng: 4 } },
+  ],
+  players: [
+    { guesses: [{ lat: 10, lng: 10 }, { lat: 41.12345, lng: -72.54321 }] },
+    { guesses: [{ lat: 41.12345, lng: -72.54321 }, { lat: 50, lng: 50 }] },
+  ],
+};
+assert.deepEqual(
+  adapter.matchingGuess(unidentifiedPlayers, 2, { lat: 41.12346, lng: -72.5432 }),
+  { lat: 41.12345, lng: -72.54321 },
+  "the placed pin identifies the current-round player guess without a profile ID",
+);
+assert.equal(
+  adapter.matchingGuess(unidentifiedPlayers, 1, { lat: 50, lng: 50 }),
+  null,
+  "a coordinate submitted in another round cannot impersonate the current guess",
+);
+assert.deepEqual(adapter.submittedGuess(JSON.stringify({ guess: {
+  latitude: 12.3,
+  longitude: -45.6,
+} })), { lat: 12.3, lng: -45.6 },
+"an outgoing Live Challenge request reveals the submitted pin");
+assert.deepEqual(adapter.submittedGuess("lat=12.3&lng=-45.6"), { lat: 12.3, lng: -45.6 });
+assert.equal(adapter.submittedGuess("not-json"), null);
 
 const party = fixture("party");
 const noProfile = adapter.normalizeRound(party.payload, "party-game", null);
