@@ -1,7 +1,7 @@
 (function (root) {
   "use strict";
 
-  const LIVE_CHALLENGE_PATH = /^\/(?:api\/)?live-challenge\/([^/?#]+)\/?$/;
+  const LIVE_CHALLENGE_PATH = /^\/(?:api\/)?live-challenge\/([^/?#]+)(?:\/[^?#]*)?\/?$/;
   const PARTY_LOBBY_PATH = /^\/party\/lobby\/[^/?#]+\/?$/;
   const RESULT_SELECTORS = Object.freeze([
     '[class*="result-map_roundPin"]',
@@ -248,6 +248,85 @@
     };
   }
 
+  function matchingGuess(data, number, target) {
+    const wanted = coordinates(target);
+    if (!wanted) return null;
+    const matches = [];
+    const seen = new Set();
+    const visit = (value, path, inheritedRound, depth) => {
+      if (!value || typeof value !== "object" || depth > 12 || seen.has(value)) return;
+      seen.add(value);
+      const pathText = path.join(".").toLowerCase();
+      const itemRound = statedRound(value);
+      const effectiveRound = itemRound ?? inheritedRound;
+      const candidate = coordinates(value);
+      if (
+        candidate
+        && /(guess|answer|result)/.test(pathText)
+        && !/(question|panorama|correct)/.test(pathText)
+        && (effectiveRound == null || effectiveRound === number)
+      ) {
+        const delta = Math.hypot(candidate.lat - wanted.lat, candidate.lng - wanted.lng);
+        if (delta <= 0.001) matches.push({ candidate, delta });
+      }
+      const collectionName = String(path[path.length - 1] || "").toLowerCase();
+      for (const [key, item] of Object.entries(value)) {
+        const indexedRound = Array.isArray(value)
+          && /(guesses|answers|roundresults|results)/.test(collectionName)
+          && /^\d+$/.test(key)
+          ? Number(key) + 1
+          : effectiveRound;
+        visit(item, [...path, key], indexedRound, depth + 1);
+      }
+    };
+    visit(data, [], null, 0);
+    matches.sort((left, right) => left.delta - right.delta);
+    return matches[0]?.candidate || null;
+  }
+
+  function submittedGuess(body) {
+    let value = body;
+    if (value && typeof value.get === "function") {
+      const rawLatitude = value.get("lat") ?? value.get("latitude");
+      const rawLongitude = value.get("lng") ?? value.get("longitude") ?? value.get("lon");
+      const latitude = Number(rawLatitude);
+      const longitude = Number(rawLongitude);
+      if (rawLatitude != null && rawLongitude != null
+          && Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        return { lat: latitude, lng: longitude };
+      }
+    }
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch (_error) {
+        const params = new URLSearchParams(value);
+        const rawLatitude = params.get("lat") ?? params.get("latitude");
+        const rawLongitude = params.get("lng") ?? params.get("longitude") ?? params.get("lon");
+        const latitude = Number(rawLatitude);
+        const longitude = Number(rawLongitude);
+        return rawLatitude != null && rawLongitude != null
+          && Number.isFinite(latitude) && Number.isFinite(longitude)
+          ? { lat: latitude, lng: longitude }
+          : null;
+      }
+    }
+    const seen = new Set();
+    const visit = (item, depth) => {
+      if (!item || typeof item !== "object" || depth > 8 || seen.has(item)) return null;
+      seen.add(item);
+      const direct = coordinates(item);
+      if (direct) return direct;
+      for (const [key, child] of Object.entries(item)) {
+        if (/(correct|answer|question|panorama)/i.test(key)) continue;
+        const found = visit(child, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    };
+    return visit(value, 0);
+  }
+
   function numberFrom(value, paths) {
     for (const path of paths) {
       let current = value;
@@ -376,6 +455,8 @@
     completedRoundNumber,
     latestGuessedRoundNumber,
     lifecycle,
+    matchingGuess,
+    submittedGuess,
     normalizeRound,
     normalizeActiveRound,
     buildEventState,
