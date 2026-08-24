@@ -70,5 +70,9 @@ assert.match(source, /function discoverReactResultMaps\(\)/,
   "result maps missed by the early Google Maps hook have a React-instance fallback");
 assert.match(source, /function trackMap\(map\)/,
   "single-player and Live Challenge maps share overlay, hover, and guess-prefetch wiring");
+assert.match(source, /\.omt-board-current > img,\.omt-board-match > img \{[^}]*object-fit:cover/,
+  "single-direction V-board thumbnails fill their cells instead of becoming a letterboxed square");
+assert.match(source, /image\.src = boardThumbnail \? resolved : fitViewToBox/,
+  "V-board thumbnails retain the canonical embedding aspect on every browser");
 
 process.stdout.write("userscript architecture contract passed\n");

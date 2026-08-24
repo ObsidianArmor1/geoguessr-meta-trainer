@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.59
+// @version      2.2.0-beta.60
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.59";
+  const USERSCRIPT_VERSION = "2.2.0-beta.60";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -1167,7 +1167,12 @@
     .omt-board-current { border:2px solid #e8e9ec; }
     .omt-board-match.omt-board-guess { border:2px solid #e6a64c; }
     .omt-board-match.omt-board-guess span { color:#ffd993; }
-    .omt-board-current img,.omt-board-match img { display:block; width:100%; height:100%; object-fit:contain; }
+    /* Board thumbnails always use the canonical 448x256 embedding view. Fill
+       the tile by cropping the small aspect-ratio excess instead of rewriting
+       Google's thumbnail request to the viewport shape: that endpoint can
+       return a near-square result on some browsers, which contain then
+       letterboxes into a narrow square in the middle of the cell. */
+    .omt-board-current > img,.omt-board-match > img { display:block; width:100%; height:100%; object-fit:cover; object-position:center; }
     /* Four-direction grids. minmax(0,1fr) rather than 1fr, because the implicit
        minimum of 1fr is the image's intrinsic 256px - which makes the rows
        uneven and overflows the box. These rules belong in THIS sheet: the file
@@ -2837,8 +2842,14 @@
       const contentSlot = Number(image.dataset.boardSlot);
       image.removeAttribute("data-src");
       try {
+        const boardThumbnail = Boolean(image.closest(".omt-board-grid"));
         const box = image.getBoundingClientRect();
-        image.src = fitViewToBox(await imageUrl(path), box.width, box.height);
+        const resolved = await imageUrl(path);
+        // Keep V-board thumbnails at the exact 448x256 framing C-RADIO saw.
+        // fitViewToBox remains valuable for full-screen/tooltip surfaces, but
+        // applying it here made thumbnail geometry depend on viewport shape
+        // and on browser-specific behavior of Google's thumbnail endpoint.
+        image.src = boardThumbnail ? resolved : fitViewToBox(resolved, box.width, box.height);
         if (typeof image.decode === "function") await image.decode();
         if (contentMode && Number.isInteger(contentSlot)) {
           markBoardContentStatus(
