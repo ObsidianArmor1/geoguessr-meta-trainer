@@ -11,6 +11,10 @@
     '[data-testid="correct-location-pin"]',
     '[data-qa="round-result"] [class*="result-map"]',
     '[data-testid="round-result"] [class*="result-map"]',
+    '[data-qa="round-result"]',
+    '[data-testid="round-result"]',
+    '[class*="result-map_map"]',
+    '[class*="round-result"] [class*="map"]',
   ]);
 
   function pathnameFromUrl(value) {
@@ -90,13 +94,31 @@
     return value == null ? null : String(value);
   }
 
-  function roundNumber(data) {
+  function announcedRoundNumber(data) {
     const rounds = Array.isArray(data?.rounds) ? data.rounds : [];
     const raw = Number(
       data?.currentRoundNumber ?? data?.roundNumber ?? data?.currentRound ?? data?.round,
     );
     if (Number.isInteger(raw) && raw > 0) return raw;
     return Math.max(rounds.length, 1);
+  }
+
+  function completedRoundNumber(data, wantedProfileId = null) {
+    const rounds = Array.isArray(data?.rounds) ? data.rounds : [];
+    const announced = announcedRoundNumber(data);
+    const upper = Math.min(Math.max(announced, rounds.length), rounds.length);
+
+    // Prefer the newest round that actually contains this player's submitted
+    // guess. This tolerates payloads in which round arrays and the announced
+    // round update at slightly different moments during the result transition.
+    for (let number = upper; number >= 1; number -= 1) {
+      const sourceRound = roundAt(data, number);
+      if (!panoramaForRound(sourceRound)) continue;
+      if (playerGuess(data, sourceRound, number, wantedProfileId)) return number;
+    }
+
+    // The API's round number is 1-based; roundAt performs the index conversion.
+    return Math.min(announced, Math.max(rounds.length, 1));
   }
 
   function roundAt(data, number) {
@@ -220,8 +242,7 @@
     return { score: null, distanceMeters: null, timeSeconds: null };
   }
 
-  function normalizeRound(data, challengeId, wantedProfileId = null) {
-    const number = roundNumber(data);
+  function normalizeRoundAt(data, challengeId, number, wantedProfileId = null) {
     const sourceRound = roundAt(data, number);
     const panorama = panoramaForRound(sourceRound);
     if (!panorama) return null;
@@ -240,6 +261,19 @@
       playerGuess: playerGuess(data, sourceRound, number, wantedProfileId),
       outcome: roundOutcome(data, sourceRound, number, wantedProfileId),
     };
+  }
+
+  function normalizeRound(data, challengeId, wantedProfileId = null) {
+    return normalizeRoundAt(
+      data,
+      challengeId,
+      completedRoundNumber(data, wantedProfileId),
+      wantedProfileId,
+    );
+  }
+
+  function normalizeActiveRound(data, challengeId) {
+    return normalizeRoundAt(data, challengeId, announcedRoundNumber(data), null);
   }
 
   function buildEventState(liveRound, challengeId) {
@@ -281,7 +315,9 @@
     mapKey,
     profileId,
     playerGuess,
+    completedRoundNumber,
     normalizeRound,
+    normalizeActiveRound,
     buildEventState,
     resultMounted,
   };

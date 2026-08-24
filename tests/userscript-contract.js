@@ -64,8 +64,14 @@ assert.doesNotMatch(source, /new maps\.Marker\(/,
   "recommendation pins must not use Google Marker hit regions");
 assert.match(source, /await handleRoundEnd\(liveChallengeAdapter\.buildEventState\(liveRound, challengeId\)\)/,
   "Live Challenge enters the same complete round-end pipeline as single-player");
-assert.match(source, /if \(LIVE_CHALLENGE_PATH\.test\(location\.pathname\)[\s\S]*PARTY_LOBBY_PATH\.test\(location\.pathname\)\) return;/,
-  "the event framework cannot race the authoritative Live Challenge result path");
+assert.doesNotMatch(source, /framework\.events\.addEventListener\("round_end"[\s\S]{0,800}LIVE_CHALLENGE_PATH[\s\S]{0,300}return;/,
+  "Live Challenge must not be excluded from the shared full-feature round_end path");
+assert.match(source, /if \(state\.roundRequestKey === requestKey && state\.roundRequestQuality >= requestQuality\) return;/,
+  "the API fallback and event framework share a quality-aware deduplication gate");
+assert.doesNotMatch(source, /if \(state\.liveChallengeResultVisible\) clearRound\(\)/,
+  "a transient Live Challenge result subtree must not tear down completed review state");
+assert.match(source, /liveChallengeResultMounted\(\) \|\| frameworkEnded/,
+  "the Live Challenge API fallback is not wholly dependent on a hashed result selector");
 assert.match(source, /function discoverReactResultMaps\(\)/,
   "result maps missed by the early Google Maps hook have a React-instance fallback");
 assert.match(source, /function trackMap\(map\)/,

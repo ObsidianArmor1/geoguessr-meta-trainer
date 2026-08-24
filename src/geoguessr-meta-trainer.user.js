@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.60
+// @version      2.2.0-beta.61
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.60";
+  const USERSCRIPT_VERSION = "2.2.0-beta.61";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -247,6 +247,8 @@
     liveChallengeResultVisible: false,
     liveChallengeLastRoundKey: "",
     liveChallengePendingKey: "",
+    roundRequestKey: "",
+    roundRequestQuality: -1,
     liveChallengeProfileId: null,
     liveChallengeProfilePromise: null,
     loggedRoundEvents: new Set(),
@@ -4123,6 +4125,8 @@
     state.playerGuess = null;
     state.roundIdentity = null;
     state.lastRoundEventState = null;
+    state.roundRequestKey = "";
+    state.roundRequestQuality = -1;
     state.diagnostics.round = null;
     state.diagnostics.retrieval = null;
     state.diagnostics.rendering = null;
@@ -4380,8 +4384,8 @@
         { method: "GET", credentials: "include" },
       );
       if (!response.ok) return null;
-      const liveRound = normalizedLiveChallengeRound(
-        await response.json(), challengeId, null,
+      const liveRound = liveChallengeAdapter.normalizeActiveRound(
+        await response.json(), challengeId,
       );
       if (!liveRound?.location?.panoId) return null;
       prefetchModalForMap(liveRound.location.panoId, {
@@ -4502,9 +4506,13 @@
     const checkResult = async () => {
       checkQueued = false;
       const challengeId = liveChallengeIdForPage(trackedChallenge);
-      const mounted = Boolean(challengeId) && liveChallengeResultMounted();
+      const frameworkEnded = pageWindow.GeoGuessrEventFramework?.state?.round_in_progress === false;
+      const mounted = Boolean(challengeId) && (liveChallengeResultMounted() || frameworkEnded);
       if (!mounted) {
-        if (state.liveChallengeResultVisible) clearRound();
+        // Result subtrees are transient in Live Challenge and can disappear
+        // during ordinary React rerenders. A missing selector must never tear
+        // down a completed review. The authoritative round_start event owns
+        // cleanup, exactly as it does in single player.
         state.liveChallengeResultVisible = false;
         state.liveChallengePendingKey = "";
         if (challengeId) {
@@ -4561,7 +4569,12 @@
     };
     const observer = new MutationObserver(queueCheck);
     const begin = () => {
-      observer.observe(document.body, { childList: true, subtree: true });
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "data-qa", "data-testid"],
+      });
       queueCheck();
     };
     if (document.body) begin();
@@ -4589,6 +4602,18 @@
     const rounds = eventState?.rounds || [];
     const round = rounds[rounds.length - 1];
     if (!round?.location) return;
+    const requestPanoId = decodedPanoId(round.location.panoId);
+    const requestKey = requestPanoId
+      ? `${rounds.length}:${requestPanoId}`
+      : `${rounds.length}:${Number(round.location.lat).toFixed(6)},${Number(round.location.lng).toFixed(6)}`;
+    const rawRequestGuess = round.player_guess || round.playerGuess || round.guess;
+    const requestQuality = 1
+      + (rawRequestGuess ? 2 : 0)
+      + (Number.isFinite(Number(round.score?.amount ?? round.score)) ? 1 : 0)
+      + (Number.isFinite(Number(round.distance?.meters?.amount ?? round.distanceMeters)) ? 1 : 0);
+    if (state.roundRequestKey === requestKey && state.roundRequestQuality >= requestQuality) return;
+    state.roundRequestKey = requestKey;
+    state.roundRequestQuality = requestQuality;
     state.lastRoundEventState = eventState;
     state.round = rounds.length;
     const rawGuess = round.player_guess || round.playerGuess || round.guess;
@@ -4608,7 +4633,7 @@
       eventState?.mapId,
       eventState?.map?.id,
     ].find((value) => typeof value === "string" && value.length);
-    const cloudPanoId = decodedPanoId(round.location.panoId);
+    const cloudPanoId = requestPanoId;
     if (cloudPanoId) params.set("pano_id", cloudPanoId);
     if (Number.isFinite(round.location.lat)) params.set("lat", round.location.lat);
     if (Number.isFinite(round.location.lng)) params.set("lng", round.location.lng);
@@ -4735,6 +4760,10 @@
       clearTimeout(state.pendingTimer);
       state.pendingTimer = 0;
       if (token === state.requestToken) {
+        if (state.roundRequestKey === requestKey) {
+          state.roundRequestKey = "";
+          state.roundRequestQuality = -1;
+        }
         const clientDiagnostic = cradioClient.diagnostics?.() || {};
         state.diagnostics.retrieval = {
           ...state.diagnostics.retrieval,
@@ -4803,13 +4832,9 @@
           prefetchModalFromEventState(event.detail);
         });
         framework.events.addEventListener("round_end", (event) => {
-          // Live Challenge has a different authoritative state endpoint and
-          // can also emit a framework round_end. Running both paths races two
-          // reviews for the same round, losing the player/outcome data from one
-          // of them and occasionally clearing the completed UI. Its adapter is
-          // the sole round-end owner on both public and party-lobby routes.
-          if (LIVE_CHALLENGE_PATH.test(location.pathname)
-              || PARTY_LOBBY_PATH.test(location.pathname)) return;
+          // Use the same complete review pipeline in every mode. The Live
+          // Challenge adapter is now only a fallback/enrichment source; the
+          // request-key quality gate in handleRoundEnd prevents races.
           handleRoundEnd(event.detail);
         });
         pageWindow.GEFFetchEvents?.addEventListener("received_data", (event) => {
