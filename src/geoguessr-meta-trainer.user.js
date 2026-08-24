@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.61
+// @version      2.2.0-beta.62
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.61";
+  const USERSCRIPT_VERSION = "2.2.0-beta.62";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -557,6 +557,19 @@
     return /^[\x20-\x7e]+$/.test(decoded) ? decoded : text;
   }
 
+  function reviewRequestKey(roundNumber, locationValue) {
+    const panoId = decodedPanoId(locationValue?.panoId ?? locationValue?.panoid);
+    if (panoId) return `${roundNumber}:${panoId}`;
+    const latitude = Number(locationValue?.lat ?? locationValue?.latitude);
+    const longitude = Number(locationValue?.lng ?? locationValue?.longitude);
+    return `${roundNumber}:${latitude.toFixed(6)},${longitude.toFixed(6)}`;
+  }
+
+  function clearCompletedReviewForActiveRound(roundNumber, locationValue) {
+    if (!state.review || !state.roundRequestKey) return;
+    if (reviewRequestKey(roundNumber, locationValue) !== state.roundRequestKey) clearRound();
+  }
+
   function prefetchModalRound(panoId, context = {}) {
     // The static pack needs no credential, so gating this on a configured Modal
     // token skipped the round-start prefetch entirely for anyone playing off
@@ -600,6 +613,7 @@
     if (!Number.isInteger(roundNumber) || !Array.isArray(guesses)
         || guesses.length >= roundNumber) return;
     const location = data?.rounds?.[roundNumber - 1];
+    clearCompletedReviewForActiveRound(roundNumber, location);
     const datasetKey = typeof data?.map === "string" ? data.map : data?.map?.id;
     const panoId = decodedPanoId(location?.panoId);
     const latitude = Number(location?.lat);
@@ -4388,6 +4402,7 @@
         await response.json(), challengeId,
       );
       if (!liveRound?.location?.panoId) return null;
+      clearCompletedReviewForActiveRound(liveRound.roundNumber, liveRound.location);
       prefetchModalForMap(liveRound.location.panoId, {
         latitude: liveRound.location.lat,
         longitude: liveRound.location.lng,
@@ -4603,9 +4618,7 @@
     const round = rounds[rounds.length - 1];
     if (!round?.location) return;
     const requestPanoId = decodedPanoId(round.location.panoId);
-    const requestKey = requestPanoId
-      ? `${rounds.length}:${requestPanoId}`
-      : `${rounds.length}:${Number(round.location.lat).toFixed(6)},${Number(round.location.lng).toFixed(6)}`;
+    const requestKey = reviewRequestKey(rounds.length, round.location);
     const rawRequestGuess = round.player_guess || round.playerGuess || round.guess;
     const requestQuality = 1
       + (rawRequestGuess ? 2 : 0)
