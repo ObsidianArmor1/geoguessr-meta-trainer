@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.65
+// @version      2.2.0-beta.66
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.65
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.66
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js
@@ -46,7 +46,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.65";
+  const USERSCRIPT_VERSION = "2.2.0-beta.66";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -4831,7 +4831,6 @@
     clearTimeout(state.offlineRetryTimer);
     clearTimeout(state.pendingTimer);
     const reviewStartedAt = Date.now();
-    const token = ++state.requestToken;
     const rounds = eventState?.rounds || [];
     const round = rounds[rounds.length - 1];
     if (!round?.location) return;
@@ -4843,6 +4842,12 @@
       + (Number.isFinite(Number(round.score?.amount ?? round.score)) ? 1 : 0)
       + (Number.isFinite(Number(round.distance?.meters?.amount ?? round.distanceMeters)) ? 1 : 0);
     if (state.roundRequestKey === requestKey && state.roundRequestQuality >= requestQuality) return;
+    // Duplicate round_end signals are normal: the event framework and Live
+    // adapter can both report the same completed round. Do not invalidate the
+    // useful request already in flight until this event has passed the quality
+    // gate. Previously an equal/lower-quality duplicate incremented the token,
+    // returned here, and caused the original result to be discarded as stale.
+    const token = ++state.requestToken;
     state.roundRequestKey = requestKey;
     state.roundRequestQuality = requestQuality;
     state.lastRoundEventState = eventState;
