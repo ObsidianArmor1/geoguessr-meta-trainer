@@ -416,43 +416,82 @@
     return queryRow(row, count);
   }
 
-  async function query(panoId, count) {
-    const v2 = root.LodestarPackV2;
-    if (v2 && v2.available && v2.available()) {
-      try {
-        const result = await v2.query(panoId, count);
-        if (result) return result;
-      } catch (error) {
-        console.warn("[lodestar] Pack V2 query failed; using V1:", error && error.message);
-      }
+  // The optional private/local layer is deliberately injected above both
+  // public packs. It is serialized because the Pack V2 client has one mutable
+  // configuration object while the userscript temporarily points it at a
+  // loopback pack and restores the public default on a miss/failure.
+  let privateLayer = null;
+  let v2Queue = Promise.resolve();
+
+  function configurePrivateLayer(layer) {
+    privateLayer = layer || null;
+  }
+
+  function serialV2(task) {
+    const result = v2Queue.then(task, task);
+    v2Queue = result.catch(() => undefined);
+    return result;
+  }
+
+  async function privateCall(method, args) {
+    if (!privateLayer || typeof privateLayer[method] !== "function") return null;
+    try {
+      return await privateLayer[method](...args);
+    } catch (error) {
+      console.warn(`[lodestar] private ${method} failed; using public fallback:`, error && error.message);
+      return null;
     }
-    return queryV1(panoId, count);
+  }
+
+  async function query(panoId, count) {
+    return serialV2(async () => {
+      const local = await privateCall("query", [panoId, count]);
+      if (local) return local;
+      const v2 = root.LodestarPackV2;
+      if (v2 && v2.available && v2.available()) {
+        try {
+          const result = await v2.query(panoId, count);
+          if (result) return result;
+        } catch (error) {
+          console.warn("[lodestar] Pack V2 query failed; using V1:", error && error.message);
+        }
+      }
+      return queryV1(panoId, count);
+    });
   }
 
   async function nearestPreferred(latitude, longitude, options) {
-    const v2 = root.LodestarPackV2;
-    if (v2 && v2.available && v2.available() && v2.nearest) {
-      try {
-        const result = await v2.nearest(latitude, longitude, options);
-        if (result) return result;
-      } catch (error) {
-        console.warn("[lodestar] Pack V2 spatial lookup failed; using V1:", error && error.message);
+    return serialV2(async () => {
+      const local = await privateCall("nearest", [latitude, longitude, options]);
+      if (local) return local;
+      const v2 = root.LodestarPackV2;
+      if (v2 && v2.available && v2.available() && v2.nearest) {
+        try {
+          const result = await v2.nearest(latitude, longitude, options);
+          if (result) return result;
+        } catch (error) {
+          console.warn("[lodestar] Pack V2 spatial lookup failed; using V1:", error && error.message);
+        }
       }
-    }
-    return nearest(latitude, longitude, options);
+      return nearest(latitude, longitude, options);
+    });
   }
 
   async function similarityBetween(panoIdA, panoIdB) {
-    const v2 = root.LodestarPackV2;
-    if (v2 && v2.available && v2.available() && v2.similarityBetween) {
-      try {
-        const result = await v2.similarityBetween(panoIdA, panoIdB);
-        if (Number.isFinite(result)) return result;
-      } catch (error) {
-        console.warn("[lodestar] Pack V2 projection failed; using V1:", error && error.message);
+    return serialV2(async () => {
+      const local = await privateCall("similarityBetween", [panoIdA, panoIdB]);
+      if (Number.isFinite(local)) return local;
+      const v2 = root.LodestarPackV2;
+      if (v2 && v2.available && v2.available() && v2.similarityBetween) {
+        try {
+          const result = await v2.similarityBetween(panoIdA, panoIdB);
+          if (Number.isFinite(result)) return result;
+        } catch (error) {
+          console.warn("[lodestar] Pack V2 projection failed; using V1:", error && error.message);
+        }
       }
-    }
-    return similarityBetweenV1(panoIdA, panoIdB);
+      return similarityBetweenV1(panoIdA, panoIdB);
+    });
   }
 
   async function queryRow(row, count) {
@@ -514,6 +553,6 @@
   root.LodestarPack = {
     query, queryRow, nearest: nearestPreferred, directory, headings, headingOf, boundary,
     adaptiveCount, sphericalClick, half, haversineKm,
-    projectedVector, similarityBetween,
+    projectedVector, similarityBetween, configurePrivateLayer,
   };
 })(typeof window !== "undefined" ? window : globalThis);
