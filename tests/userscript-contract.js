@@ -68,6 +68,15 @@ assert.doesNotMatch(source, /framework\.events\.addEventListener\("round_end"[\s
   "Live Challenge must not be excluded from the shared full-feature round_end path");
 assert.match(source, /if \(state\.roundRequestKey === requestKey && state\.roundRequestQuality >= requestQuality\) return;/,
   "the API fallback and event framework share a quality-aware deduplication gate");
+const roundEndBody = source.slice(
+  source.indexOf("async function handleRoundEnd(eventState)"),
+  source.indexOf("function prefetchModalFromEventState(eventState)"),
+);
+assert.ok(
+  roundEndBody.indexOf("if (state.roundRequestKey === requestKey && state.roundRequestQuality >= requestQuality) return;")
+    < roundEndBody.indexOf("const token = ++state.requestToken;"),
+  "an ignored duplicate round-end event must not invalidate the useful request already in flight",
+);
 assert.doesNotMatch(source, /if \(state\.liveChallengeResultVisible\) clearRound\(\)/,
   "a transient Live Challenge result subtree must not tear down completed review state");
 assert.doesNotMatch(source, /frameworkEnded/,
