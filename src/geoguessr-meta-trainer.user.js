@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.64
+// @version      2.2.0-beta.65
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.64
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.65
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js
@@ -26,6 +26,8 @@
 // @connect      streetviewpixels-pa.googleapis.com
 // @connect      obsidianarmor1--geoguessr-cradio-pilot-v1-pilot-query.modal.run
 // @connect      obsidianarmor1--geoguessr-cradio-lodestar-v1-pilot-query.modal.run
+// @connect      127.0.0.1
+// @connect      localhost
 // @updateURL    https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js
 // @downloadURL  https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js
 // @run-at       document-start
@@ -44,7 +46,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.64";
+  const USERSCRIPT_VERSION = "2.2.0-beta.65";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -129,6 +131,212 @@
   if (!cradioAdapter) throw new Error("Modal C-RADIO client did not load");
   const cradioClient = new cradioAdapter.ModalCradioClient();
 
+  const PRIVATE_LAYER_STORAGE_KEY = "omt-private-local-pack-v1";
+  const DEFAULT_PRIVATE_LAYER_CONFIG = {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8766/pack",
+  };
+
+  function normalizePrivateLayerUrl(value) {
+    const parsed = new URL(String(value || "").trim());
+    if (!new Set(["127.0.0.1", "localhost"]).has(parsed.hostname)
+        || !new Set(["http:", "https:"]).has(parsed.protocol)
+        || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      throw new Error("private pack URL must be a loopback HTTP(S) URL without credentials/query");
+    }
+    const pathname = parsed.pathname.replace(/\/+$/, "") || "/pack";
+    return `${parsed.origin}${pathname}`;
+  }
+
+  function readPrivateLayerConfig() {
+    try {
+      const stored = typeof GM_getValue === "function"
+        ? GM_getValue(PRIVATE_LAYER_STORAGE_KEY, null)
+        : null;
+      const value = stored && typeof stored === "object" ? stored : JSON.parse(stored || "null");
+      return {
+        enabled: value?.enabled !== false,
+        baseUrl: normalizePrivateLayerUrl(value?.baseUrl || DEFAULT_PRIVATE_LAYER_CONFIG.baseUrl),
+      };
+    } catch (_error) {
+      return { ...DEFAULT_PRIVATE_LAYER_CONFIG };
+    }
+  }
+
+  function persistPrivateLayerConfig() {
+    if (typeof GM_setValue === "function") {
+      GM_setValue(PRIVATE_LAYER_STORAGE_KEY, { ...privateLayerConfig });
+    }
+  }
+
+  let privateLayerConfig = readPrivateLayerConfig();
+  let privateLayerOutageUntil = 0;
+  let privateLayerLastError = null;
+  let privatePackActive = false;
+  let privateLayer = null;
+
+  function privatePackApi() {
+    return pageWindow.LodestarPackV2 || window.LodestarPackV2;
+  }
+
+  function restorePublicPack() {
+    const pack = privatePackApi();
+    if (privatePackActive && pack?.configure && pack?.defaultConfig) {
+      pack.configure(pack.defaultConfig());
+    }
+    privatePackActive = false;
+  }
+
+  function privatePackTransport(url, options = {}) {
+    const headers = options.range
+      ? { Range: `bytes=${options.range.start}-${options.range.end}` }
+      : undefined;
+    if (typeof GM_xmlhttpRequest === "function") {
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: "GET",
+          url,
+          headers,
+          responseType: "arraybuffer",
+          timeout: 3_000,
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              resolve({ buffer: response.response, status: response.status });
+            } else {
+              reject(new Error(`${url} -> HTTP ${response.status}`));
+            }
+          },
+          onerror: () => reject(new Error(`${url} -> network error`)),
+          ontimeout: () => reject(new Error(`${url} -> timeout`)),
+        });
+      });
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3_000);
+    return fetch(url, { headers, signal: controller.signal })
+      .then(async (response) => ({
+        buffer: await response.arrayBuffer(),
+        status: response.status,
+      }))
+      .finally(() => clearTimeout(timer));
+  }
+
+  function ensurePrivatePack() {
+    const pack = privatePackApi();
+    if (!pack?.configure) return null;
+    if (!privatePackActive) {
+      pack.configure({ baseUrl: privateLayerConfig.baseUrl, transport: privatePackTransport });
+      privatePackActive = true;
+    }
+    return pack;
+  }
+
+  async function privatePackCall(method, args) {
+    if (!privateLayerConfig.enabled || Date.now() < privateLayerOutageUntil) {
+      restorePublicPack();
+      return null;
+    }
+    const pack = ensurePrivatePack();
+    if (!pack || typeof pack[method] !== "function") return null;
+    try {
+      const result = await pack[method](...args);
+      if (result) {
+        privateLayerLastError = null;
+        return result;
+      }
+      // A clean pano/coordinate miss must immediately let the public layer run.
+      restorePublicPack();
+      return null;
+    } catch (error) {
+      privateLayerLastError = String(error?.message || error).slice(0, 240);
+      privateLayerOutageUntil = Date.now() + 60_000;
+      restorePublicPack();
+      return null;
+    }
+  }
+
+  function privateLayerDiagnostics() {
+    return {
+      enabled: privateLayerConfig.enabled,
+      baseHost: (() => {
+        try { return new URL(privateLayerConfig.baseUrl).host; } catch (_error) { return "invalid"; }
+      })(),
+      active: privatePackActive,
+      outageUntil: privateLayerOutageUntil || null,
+      lastError: privateLayerLastError,
+    };
+  }
+
+  function installPrivateLayer() {
+    const pack = pageWindow.LodestarPack || window.LodestarPack;
+    if (!pack?.configurePrivateLayer) return;
+    privateLayer = {
+      query: (panoId, count) => privatePackCall("query", [panoId, count]),
+      nearest: (latitude, longitude, options) => privatePackCall("nearest", [latitude, longitude, options]),
+      similarityBetween: (panoIdA, panoIdB) => privatePackCall("similarityBetween", [panoIdA, panoIdB]),
+      diagnostics: privateLayerDiagnostics,
+    };
+    pack.configurePrivateLayer(privateLayer);
+  }
+
+  function configurePrivateLocalLayer() {
+    const status = privateLayerDiagnostics();
+    const action = window.prompt(
+      `Private local Pack V2 is ${status.enabled ? "enabled" : "disabled"} at ${status.baseHost}. `
+        + "Enter STATUS, ENABLE, DISABLE, SET, or CLEAR.",
+      "STATUS",
+    );
+    if (!action) return;
+    const command = String(action).trim().toLowerCase();
+    if (command === "status") {
+      window.alert(`Private local layer: ${status.enabled ? "enabled" : "disabled"}; ${status.baseHost}. `
+        + (status.lastError ? `Last outage: ${status.lastError}` : "No recorded outage."));
+      return;
+    }
+    if (command === "enable" || command === "on") {
+      privateLayerConfig.enabled = true;
+      privateLayerOutageUntil = 0;
+      privateLayerLastError = null;
+      persistPrivateLayerConfig();
+      window.alert("Private local layer enabled; it will be tried before the public corpus.");
+      return;
+    }
+    if (command === "disable" || command === "off") {
+      privateLayerConfig.enabled = false;
+      privateLayerOutageUntil = 0;
+      privateLayerLastError = null;
+      restorePublicPack();
+      persistPrivateLayerConfig();
+      window.alert("Private local layer disabled; the existing public corpus remains active.");
+      return;
+    }
+    if (command === "clear") {
+      privateLayerConfig = { ...DEFAULT_PRIVATE_LAYER_CONFIG };
+      privateLayerOutageUntil = 0;
+      privateLayerLastError = null;
+      restorePublicPack();
+      persistPrivateLayerConfig();
+      window.alert("Private local layer reset to its loopback default.");
+      return;
+    }
+    if (command !== "set") {
+      window.alert("Choose STATUS, ENABLE, DISABLE, SET, or CLEAR.");
+      return;
+    }
+    const value = window.prompt("Loopback Pack V2 base URL (for example http://127.0.0.1:8766/pack):", privateLayerConfig.baseUrl);
+    if (!value) return;
+    try {
+      privateLayerConfig = { enabled: true, baseUrl: normalizePrivateLayerUrl(value) };
+      privateLayerOutageUntil = 0;
+      privateLayerLastError = null;
+      restorePublicPack();
+      persistPrivateLayerConfig();
+      window.alert(`Private local layer saved at ${privateLayerConfig.baseUrl}.`);
+    } catch (error) {
+      window.alert(String(error?.message || error));
+    }
+  }
+
   function configureCloudRadio() {
     const status = cradioClient.tokenStatus();
     const action = window.prompt(
@@ -163,6 +371,7 @@
 
   if (typeof GM_registerMenuCommand === "function") {
     GM_registerMenuCommand("Configure C-RADIO cloud", configureCloudRadio);
+    GM_registerMenuCommand("Configure private local corpus layer", configurePrivateLocalLayer);
     GM_registerMenuCommand("Copy trainer diagnostics", copyTrainerDiagnostics);
     GM_registerMenuCommand("Retry current trainer round", retryCurrentRound);
     GM_registerMenuCommand("Set matches shown per round", () => {
@@ -177,6 +386,7 @@
   const prewarmedRoundKeys = new Set();
   const modalRoundPromises = new Map();
   const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
+  installPrivateLayer();
   const mapLayerPreferences = readMapLayerPreferences();
   const mapColorPreferences = readMapColorPreferences();
   const state = {
@@ -324,6 +534,9 @@
       packV2: pack?.diagnostics?.() || {
         loaded: Boolean(pack),
         diagnosticsUnavailable: true,
+      },
+      privateLocalLayer: privateLayer?.diagnostics?.() || {
+        installed: false,
       },
     };
   }

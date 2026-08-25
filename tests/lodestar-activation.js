@@ -25,9 +25,9 @@ assert.deepEqual(v2.defaultConfig(), {
   ...expected,
   cacheName: "lodestar-pack-v2-balanced-2m-b6f99168d869873c",
 });
-assert.equal(pkg.version, "2.2.0-beta.64");
-assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.64$/m);
-assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.64";/);
+assert.equal(pkg.version, "2.2.0-beta.65");
+assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.65$/m);
+assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.65";/);
 assert.match(expected.baseUrl, /^https:\/\/huggingface\.co\/datasets\/riot1\/lodestar-balanced-2m-neighbors-v2\/resolve\/[a-f0-9]{40}$/,
   "default source is a public immutable Hugging Face revision");
 assert.doesNotMatch(expected.baseUrl, /(?:hf_|wk-)[A-Za-z0-9_-]{20,}/,
@@ -97,6 +97,19 @@ v2.configure({ baseUrl: expected.baseUrl, manifest: verifiedManifest });
   assert.equal(fallback.corpus, "lodestar-1m");
   assert.equal(fallback.corpusSize, 999693);
   assert.equal(fallback.matches.length, 3);
+
+  globalThis.LodestarPackV2 = {
+    available: () => true,
+    query: async () => ({ source: "public-pack", matches: [] }),
+  };
+  globalThis.LodestarPack.configurePrivateLayer({
+    query: async () => ({ source: "private-pack", matches: [] }),
+  });
+  assert.equal((await globalThis.LodestarPack.query("private-id", 3)).source, "private-pack",
+    "configured private layer is tried before public Pack V2");
+  globalThis.LodestarPack.configurePrivateLayer({ query: async () => null });
+  assert.equal((await globalThis.LodestarPack.query("public-id", 3)).source, "public-pack",
+    "private miss falls through to public Pack V2");
   process.stdout.write("Lodestar 2M activation/default/disable/fallback tests passed\n");
 })().catch((error) => {
   console.error(error);
