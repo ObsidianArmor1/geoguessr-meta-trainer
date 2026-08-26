@@ -25,9 +25,9 @@ assert.deepEqual(v2.defaultConfig(), {
   ...expected,
   cacheName: "lodestar-pack-v2-balanced-2m-b6f99168d869873c",
 });
-assert.equal(pkg.version, "2.2.0-beta.73");
-assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.73$/m);
-assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.73";/);
+assert.equal(pkg.version, "2.2.0-beta.74");
+assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.74$/m);
+assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.74";/);
 assert.match(expected.baseUrl, /^https:\/\/huggingface\.co\/datasets\/riot1\/lodestar-balanced-2m-neighbors-v2\/resolve\/[a-f0-9]{40}$/,
   "default source is a public immutable Hugging Face revision");
 assert.doesNotMatch(expected.baseUrl, /(?:hf_|wk-)[A-Za-z0-9_-]{20,}/,
@@ -101,7 +101,17 @@ v2.configure({ baseUrl: expected.baseUrl, manifest: verifiedManifest });
   globalThis.LodestarPackV2 = {
     available: () => true,
     query: async () => ({ source: "public-pack", matches: [] }),
+    nearest: async () => new Promise(() => {}),
   };
+  void globalThis.LodestarPack.nearest(0, 0);
+  const unblockedRound = await Promise.race([
+    globalThis.LodestarPack.query("public-id", 3),
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error("round lookup queued behind guess-side warming")), 50,
+    )),
+  ]);
+  assert.equal(unblockedRound.source, "public-pack",
+    "a stalled guess-side warm must not block the authoritative round lookup");
   assert.equal((await globalThis.LodestarPack.query("public-id", 3)).source, "public-pack",
     "the active wrapper queries the public Pack V2 directly");
   assert.equal("configurePrivateLayer" in globalThis.LodestarPack, false,
