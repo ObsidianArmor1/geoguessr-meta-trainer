@@ -422,15 +422,22 @@
     // concurrently; serializing them caused one slow spatial lookup to leave
     // every later round stuck on "similarity warming...".
     const v2 = root.LodestarPackV2;
+    let v2Error = null;
     if (v2 && v2.available && v2.available()) {
       try {
         const result = await v2.query(panoId, count);
         if (result) return result;
       } catch (error) {
+        v2Error = error;
         console.warn("[lodestar] Pack V2 query failed; using V1:", error && error.message);
       }
     }
-    return queryV1(panoId, count);
+    const fallback = await queryV1(panoId, count);
+    // `null` means genuinely absent only when V2 completed. If V2 failed and
+    // the older, smaller pack has no row, preserve the operational failure so
+    // the UI cannot misreport an unrelated Modal 404 as the root cause.
+    if (!fallback && v2Error) throw v2Error;
+    return fallback;
   }
 
   async function nearestPreferred(latitude, longitude, options) {
