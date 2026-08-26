@@ -6,8 +6,8 @@
   // deliberate disable path, and LodestarPack V1 remains the automatic
   // rollback path if a V2 request fails.
   const DEFAULT_BASE_URL =
-    "https://huggingface.co/datasets/riot1/lodestar-balanced-2m-neighbors-v2/resolve/362e0933a897fff88a54107c6aabf20d18aaa0f4";
-  const DEFAULT_REVISION = "362e0933a897fff88a54107c6aabf20d18aaa0f4";
+    "https://huggingface.co/datasets/riot1/lodestar-balanced-2m-neighbors-v2/resolve/cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91";
+  const DEFAULT_REVISION = "cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91";
   const DEFAULT_GENERATION = "b6f99168d869873c";
   const DEFAULT_CORPUS = "lodestar-balanced-2m";
   const DEFAULT_CORPUS_ROWS = 1999685;
@@ -24,6 +24,8 @@
   const MIN_MATCHES = 10;
   const MAX_MEMORY_INDEXES = 64;
   const MAX_MEMORY_GEO_TILES = 32;
+  const MAX_MEMORY_VISUAL_GEO_TILES = 16;
+  const LOCAL_VISUAL_PATH = "local-visual/manifest.json";
 
   let settings = { baseUrl: DEFAULT_BASE_URL };
   const transportIds = new WeakMap();
@@ -37,6 +39,9 @@
   let blobInflight = new Map();
   let rowInflight = new Map();
   let occupancyPromise = null;
+  let localVisualManifestPromise = null;
+  let localVisualOccupancyPromise = null;
+  let localVisualTileCache = new Map();
 
   function freshRuntime() {
     return {
@@ -51,6 +56,10 @@
         retries: 0, lastStatus: null, lastRangeStatus: null, lastDurationMs: null, lastError: null,
       },
       lastQuery: null,
+      localVisual: {
+        manifest: "idle", manifestError: null, status: "idle", candidatePool: 0,
+        poolRadiusKm: null, loadedCells: 0, selection: null, durationMs: null, error: null,
+      },
     };
   }
 
@@ -79,6 +88,9 @@
       blobInflight,
       rowInflight,
       occupancyPromise,
+      localVisualManifestPromise,
+      localVisualOccupancyPromise,
+      localVisualTileCache,
       runtime,
     });
   }
@@ -88,7 +100,8 @@
     if (saved) {
       ({
         manifestPromise, indexCache, rowCache, geoTileCache, blobInflight, rowInflight,
-        occupancyPromise, runtime,
+        occupancyPromise, localVisualManifestPromise, localVisualOccupancyPromise,
+        localVisualTileCache, runtime,
       } = saved);
       runtime.configured = available();
       return;
@@ -100,6 +113,9 @@
     blobInflight = new Map();
     rowInflight = new Map();
     occupancyPromise = null;
+    localVisualManifestPromise = null;
+    localVisualOccupancyPromise = null;
+    localVisualTileCache = new Map();
     runtime = freshRuntime();
   }
 
@@ -121,6 +137,7 @@
       cache: { ...runtime.cache },
       network: { ...runtime.network },
       lastQuery: runtime.lastQuery ? { ...runtime.lastQuery } : null,
+      localVisual: { ...runtime.localVisual },
     };
   }
 
@@ -314,6 +331,35 @@
         });
     }
     return manifestPromise;
+  }
+
+  function localVisualManifest() {
+    if (!available()) return Promise.reject(new Error("Pack V2 is not configured"));
+    if (!localVisualManifestPromise) {
+      runtime.localVisual.manifest = "loading";
+      localVisualManifestPromise = Promise.all([
+        manifest(),
+        transport(resolveUrl(LOCAL_VISUAL_PATH)).then(
+          ({ buffer }) => JSON.parse(new TextDecoder().decode(buffer)),
+        ),
+      ]).then(([packInfo, value]) => {
+        if (value.format !== "lodestar-geo-visual-pack" || value.version !== 1
+            || value.corpus !== packInfo.corpus || value.generation !== packInfo.generation
+            || value.corpusRows !== (packInfo.packedRows || packInfo.corpusRows)
+            || value.projectionDimensions !== packInfo.projectionDimensions) {
+          throw new Error("Local visual sidecar does not match the active Pack V2 corpus");
+        }
+        runtime.localVisual.manifest = "ready";
+        runtime.localVisual.manifestError = null;
+        return value;
+      }).catch((error) => {
+        localVisualManifestPromise = null;
+        runtime.localVisual.manifest = "failed";
+        runtime.localVisual.manifestError = errorText(error);
+        throw error;
+      });
+    }
+    return localVisualManifestPromise;
   }
 
   function encodePanoramaId(text) {
@@ -731,10 +777,240 @@
     return best;
   }
 
+  async function localVisualOccupancy(info) {
+    if (!localVisualOccupancyPromise) {
+      localVisualOccupancyPromise = cached(
+        `local-visual-occupancy:${info.generation}`,
+        () => transport(resolveUrl(`local-visual/${info.occupancy}`)).then(
+          (result) => result.buffer,
+        ),
+      ).then(gunzip).then((buffer) => new Uint8Array(buffer));
+    }
+    return localVisualOccupancyPromise;
+  }
+
+  function parseLocalVisualTile(buffer, info, expectedRows = null) {
+    const bytes = new Uint8Array(buffer);
+    const view = new DataView(buffer);
+    const magic = new TextDecoder("ascii").decode(bytes.subarray(0, 4));
+    const version = view.getUint8(4);
+    const dimensions = view.getUint16(5, true);
+    const rows = view.getUint32(7, true);
+    const headerBytes = 11;
+    if (magic !== "LGV1" || version !== 1 || dimensions !== info.projectionDimensions
+        || (expectedRows !== null && rows !== expectedRows)
+        || buffer.byteLength !== headerBytes + rows * info.recordBytes) {
+      throw new Error("Malformed local visual tile");
+    }
+    const records = [];
+    for (let row = 0; row < rows; row += 1) {
+      const offset = headerBytes + row * info.recordBytes;
+      const codes = new Int8Array(buffer, offset + 30, dimensions);
+      let normSquared = 0;
+      for (let index = 0; index < dimensions; index += 1) {
+        normSquared += codes[index] * codes[index];
+      }
+      records.push({
+        panoId: decodePanoramaId(bytes.subarray(offset, offset + 16)),
+        latitude: view.getInt32(offset + 16, true) / COORD_SCALE,
+        longitude: view.getInt32(offset + 20, true) / COORD_SCALE,
+        heading: view.getUint16(offset + 24, true) / 100,
+        corpusRow: view.getUint32(offset + 26, true),
+        projection: codes,
+        projectionNorm: Math.sqrt(normSquared) || 1,
+      });
+    }
+    return records;
+  }
+
+  async function localVisualTile(info, latCell, lngCell) {
+    const key = latCell * info.lngCells + lngCell;
+    if (localVisualTileCache.has(key)) {
+      runtime.cache.memoryHits += 1;
+      const hit = localVisualTileCache.get(key);
+      localVisualTileCache.delete(key);
+      localVisualTileCache.set(key, hit);
+      return hit;
+    }
+    const path = geoPath(info.tilePattern, latCell, lngCell);
+    const packed = await cached(
+      `local-visual:${info.generation}:${key}`,
+      () => transport(resolveUrl(`local-visual/${path}`)).then((result) => result.buffer),
+    );
+    const records = parseLocalVisualTile(await gunzip(packed), info);
+    localVisualTileCache.set(key, records);
+    while (localVisualTileCache.size > MAX_MEMORY_VISUAL_GEO_TILES) {
+      localVisualTileCache.delete(localVisualTileCache.keys().next().value);
+    }
+    return records;
+  }
+
+  function visualCellLowerBound(latitude, longitude, info, latCell, lngCell) {
+    const degrees = info.cellDegrees;
+    const latMin = -90 + latCell * degrees;
+    const latMax = Math.min(90, latMin + degrees);
+    const lngMin = -180 + lngCell * degrees;
+    const lngMax = Math.min(180, lngMin + degrees);
+    const centerLat = (latMin + latMax) / 2;
+    const centerLng = (lngMin + lngMax) / 2;
+    const centerDistance = haversineKm(latitude, longitude, centerLat, centerLng);
+    let cellRadius = 0;
+    for (const cornerLat of [latMin, latMax]) {
+      for (const cornerLng of [lngMin, lngMax]) {
+        cellRadius = Math.max(
+          cellRadius,
+          haversineKm(centerLat, centerLng, cornerLat, cornerLng),
+        );
+      }
+    }
+    // Triangle inequality makes this conservative: a cell can look closer
+    // than it really is, which may download one extra tile but cannot omit a
+    // candidate that belongs in the adaptive pool.
+    return Math.max(0, centerDistance - cellRadius);
+  }
+
+  async function nearbyVisual(latitude, longitude, options = {}) {
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    const started = Date.now();
+    const minimumKm = Number.isFinite(options.minimumKm) ? options.minimumKm : 10;
+    const maximumKm = Number.isFinite(options.maximumKm) ? options.maximumKm : 100;
+    const targetCandidates = Math.max(1, Number(options.targetCandidates) || 160);
+    const excludedPanoId = String(options.excludePanoId || "");
+    Object.assign(runtime.localVisual, {
+      status: "loading", candidatePool: 0, poolRadiusKm: null, loadedCells: 0,
+      selection: null, durationMs: null, error: null,
+    });
+    try {
+      const info = await localVisualManifest();
+      const bitmap = await localVisualOccupancy(info);
+      const cells = [];
+      for (let cell = 0; cell < info.latCells * info.lngCells; cell += 1) {
+        if (!occupied(bitmap, cell)) continue;
+        const latCell = Math.floor(cell / info.lngCells);
+        const lngCell = cell % info.lngCells;
+        const lowerBoundKm = visualCellLowerBound(
+          latitude, longitude, info, latCell, lngCell,
+        );
+        if (lowerBoundKm <= maximumKm) cells.push({ latCell, lngCell, lowerBoundKm });
+      }
+      cells.sort((left, right) => left.lowerBoundKm - right.lowerBoundKm);
+      const candidates = [];
+      let loadedCells = 0;
+      let pool = null;
+      let poolRadiusKm = null;
+      for (let cursor = 0; cursor < cells.length;) {
+        const batch = cells.slice(cursor, cursor + 2);
+        cursor += batch.length;
+        const loaded = await Promise.all(batch.map((cell) => (
+          localVisualTile(info, cell.latCell, cell.lngCell)
+        )));
+        loadedCells += batch.length;
+        for (const records of loaded) {
+          for (const candidate of records) {
+            if (candidate.panoId === excludedPanoId) continue;
+            const distanceKm = haversineKm(
+              latitude, longitude, candidate.latitude, candidate.longitude,
+            );
+            if (distanceKm <= maximumKm) candidates.push({ ...candidate, distanceKm });
+          }
+        }
+        const nextLowerBound = cells[cursor]?.lowerBoundKm ?? Infinity;
+        const local = candidates.filter((candidate) => candidate.distanceKm <= minimumKm);
+        if (local.length >= targetCandidates && nextLowerBound > minimumKm) {
+          pool = local;
+          poolRadiusKm = minimumKm;
+          break;
+        }
+        if (candidates.length >= targetCandidates) {
+          const ordered = candidates.slice().sort((a, b) => a.distanceKm - b.distanceKm);
+          const targetDistance = ordered[targetCandidates - 1].distanceKm;
+          const adaptiveRadius = Math.max(minimumKm, targetDistance);
+          if (nextLowerBound > adaptiveRadius) {
+            pool = ordered.filter((candidate) => candidate.distanceKm <= adaptiveRadius);
+            poolRadiusKm = adaptiveRadius;
+            break;
+          }
+        }
+      }
+      if (!pool) {
+        pool = candidates.filter((candidate) => candidate.distanceKm <= maximumKm);
+        poolRadiusKm = pool.length
+          ? Math.max(...pool.map((candidate) => candidate.distanceKm))
+          : maximumKm;
+      }
+      if (!pool.length) {
+        Object.assign(runtime.localVisual, {
+          status: "unavailable", candidatePool: 0, poolRadiusKm, loadedCells,
+          durationMs: Date.now() - started,
+        });
+        return null;
+      }
+
+      if (options.prefetchOnly === true) {
+        Object.assign(runtime.localVisual, {
+          status: "warmed", candidatePool: pool.length, poolRadiusKm, loadedCells,
+          selection: null, durationMs: Date.now() - started, error: null,
+        });
+        return { candidatePool: pool.length, poolRadiusKm, loadedCells, warmed: true };
+      }
+
+      const byPano = new Map(pool.map((candidate) => [candidate.panoId, candidate]));
+      let best = null;
+      for (const match of options.roundMatches || []) {
+        const candidate = byPano.get(String(match.panoId));
+        if (!candidate) continue;
+        best = {
+          ...candidate,
+          roundRank: Number(match.rank) || null,
+          similarityToRound: Number(match.similarity),
+          estimated: false,
+          selectedBy: "strongest exact round match in adaptive local pool",
+        };
+        break;
+      }
+      if (!best) {
+        const roundVector = await projectedVector(options.roundPanoId);
+        if (!roundVector) throw new Error("Round projection is unavailable");
+        let bestScore = -Infinity;
+        for (const candidate of pool) {
+          let score = 0;
+          for (let index = 0; index < roundVector.length; index += 1) {
+            score += roundVector[index] * candidate.projection[index];
+          }
+          score /= candidate.projectionNorm;
+          if (score <= bestScore) continue;
+          bestScore = score;
+          best = {
+            ...candidate,
+            roundRank: null,
+            similarityToRound: score,
+            estimated: true,
+            selectedBy: "most visually similar projection in adaptive local pool",
+          };
+        }
+      }
+      best = {
+        ...best,
+        candidatePool: pool.length,
+        poolRadiusKm,
+      };
+      Object.assign(runtime.localVisual, {
+        status: "complete", candidatePool: pool.length, poolRadiusKm, loadedCells,
+        selection: best.selectedBy, durationMs: Date.now() - started, error: null,
+      });
+      return best;
+    } catch (error) {
+      Object.assign(runtime.localVisual, {
+        status: "failed", durationMs: Date.now() - started, error: errorText(error),
+      });
+      throw error;
+    }
+  }
+
   root.LodestarPackV2 = {
     configure, available, defaultConfig, manifest, locate, query, projectedVector, similarityBetween,
-    nearest, haversineKm,
+    nearest, nearbyVisual, localVisualManifest, haversineKm,
     encodePanoramaId, decodePanoramaId, bucketOf, parseIndex, parseRow,
-    adaptiveCount, sphericalClick, half, diagnostics,
+    parseLocalVisualTile, adaptiveCount, sphericalClick, half, diagnostics,
   };
 })(typeof window !== "undefined" ? window : globalThis);

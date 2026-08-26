@@ -69,9 +69,9 @@ global directory. A known pano fetches one small hash-bucket index and one
 self-contained ~8 KB row range, so cold bytes and browser memory no longer grow
 with the corpus. It also carries a lazy static geographic index for guess-side
 comparison. The verified public default is the immutable Hugging Face dataset
-[`riot1/lodestar-2m-neighbors-v2`](https://huggingface.co/datasets/riot1/lodestar-2m-neighbors-v2),
-pinned to revision `878a78951f65d7dc7e96dbaa85ee41121d5abcbb` and manifest generation
-`5a1bbde08350cd12`; it contains 1,999,685 rows with 300 neighbors per row.
+[`riot1/lodestar-balanced-2m-neighbors-v2`](https://huggingface.co/datasets/riot1/lodestar-balanced-2m-neighbors-v2),
+pinned to revision `cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91` and manifest generation
+`b6f99168d869873c`; it contains 1,999,685 rows with 300 neighbors per row.
 `lodestar-pack.js` keeps V1 as an automatic rollback path, and
 `LodestarPackV2.configure(null)` deliberately disables V2.
 
@@ -83,8 +83,11 @@ pinned to revision `878a78951f65d7dc7e96dbaa85ee41121d5abcbb` and manifest gener
   steers the suggested click.
 - The round and guess clouds are independently toggleable. Their overlap shows
   whether the two places share visual references.
-- The guess anchor is the strongest round match near the guess when one exists;
-  otherwise it is the nearest corpus panorama within the safety radius.
+- The near-guess comparison considers every corpus view within 10 km. If that
+  yields fewer than 160 views, it expands to the nearest 160, up to a 100 km
+  cap. It chooses the view visually closest to the round—exact top-300
+  similarity when available, otherwise a labeled projection estimate. Outside
+  the cap, the comparison is shown as unavailable.
 - Similarity between arbitrary known corpus rows uses a 256-dimensional
   projected estimate when neither row contains the other in its exact top-300.
   That estimate is labelled separately from exact neighbor-table similarity.

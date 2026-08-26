@@ -453,6 +453,16 @@
     return nearest(latitude, longitude, options);
   }
 
+  async function nearbyVisual(latitude, longitude, options) {
+    const v2 = root.LodestarPackV2;
+    if (!v2 || !v2.available || !v2.available() || !v2.nearbyVisual) return null;
+    return v2.nearbyVisual(latitude, longitude, options);
+  }
+
+  async function prefetchNearbyVisual(latitude, longitude, options) {
+    return nearbyVisual(latitude, longitude, { ...options, prefetchOnly: true });
+  }
+
   async function similarityBetween(panoIdA, panoIdB) {
     const v2 = root.LodestarPackV2;
     if (v2 && v2.available && v2.available() && v2.similarityBetween) {
@@ -523,7 +533,8 @@
   }
 
   root.LodestarPack = {
-    query, queryRow, nearest: nearestPreferred, directory, headings, headingOf, boundary,
+    query, queryRow, nearest: nearestPreferred, nearbyVisual, prefetchNearbyVisual,
+    directory, headings, headingOf, boundary,
     adaptiveCount, sphericalClick, half, haversineKm,
     projectedVector, similarityBetween,
   };

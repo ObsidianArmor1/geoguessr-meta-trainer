@@ -20,6 +20,17 @@ const built = spawnSync("python3", [
   "--replace",
 ], { cwd: repo, encoding: "utf8" });
 assert.equal(built.status, 0, built.stderr || built.stdout);
+const fixtureManifest = JSON.parse(fs.readFileSync(path.join(output, "manifest.json")));
+const sidecarBuilt = spawnSync("python3", [
+  path.join(__dirname, "../scripts/build_geo_visual_sidecar.py"),
+  "--core", path.join(repo, "master_corpus_v2/neighbor-table-1m/core.npz"),
+  "--support", v1,
+  "--out", path.join(output, "local-visual"),
+  "--rows", "64",
+  "--corpus", fixtureManifest.corpus,
+  "--generation", fixtureManifest.generation,
+], { cwd: repo, encoding: "utf8" });
+assert.equal(sidecarBuilt.status, 0, sidecarBuilt.stderr || sidecarBuilt.stdout);
 
 require("../src/lodestar-pack-v2.js");
 const pack = globalThis.LodestarPackV2;
@@ -113,6 +124,41 @@ function half(bits) {
   assert.equal(repeated.cacheHit, true, "a repeated query is served without transport");
   assert.equal(pack.diagnostics().lastQuery.cacheHit, true);
   assert.ok(pack.diagnostics().cache.memoryHits > 0);
+
+  const localVisual = await pack.nearbyVisual(sourceLatitude, sourceLongitude, {
+    roundPanoId: sourcePano,
+    excludePanoId: sourcePano,
+    minimumKm: 0,
+    targetCandidates: 16,
+    maximumKm: 21000,
+    roundMatches: [],
+  });
+  assert.ok(localVisual, "the geographic projection sidecar returns a local visual match");
+  assert.notEqual(localVisual.panoId, sourcePano,
+    "the round panorama is excluded from its own near-guess comparison");
+  assert.ok(localVisual.candidatePool >= 16);
+  assert.ok(Number.isFinite(localVisual.similarityToRound));
+  assert.equal(localVisual.estimated, true);
+  assert.equal(pack.diagnostics().localVisual.status, "complete");
+  assert.ok(pack.diagnostics().localVisual.loadedCells > 0);
+
+  const exactLocalVisual = await pack.nearbyVisual(sourceLatitude, sourceLongitude, {
+    roundPanoId: sourcePano,
+    excludePanoId: sourcePano,
+    minimumKm: 0,
+    targetCandidates: 16,
+    maximumKm: 21000,
+    roundMatches: [{
+      panoId: localVisual.panoId,
+      rank: 7,
+      similarity: 0.91,
+    }],
+  });
+  assert.equal(exactLocalVisual.panoId, localVisual.panoId);
+  assert.equal(exactLocalVisual.roundRank, 7);
+  assert.equal(exactLocalVisual.similarityToRound, 0.91);
+  assert.equal(exactLocalVisual.estimated, false,
+    "an exact top-300 intersection wins over projection estimates");
 
   const publicRequests = pack.diagnostics().network.requests;
   pack.configure({
