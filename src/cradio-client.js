@@ -473,14 +473,13 @@
       return this.fetch(panoId, context);
     }
 
-    // The guess-side cloud, restored on the corpus path.
-    //
-    // It existed for the 50k packs and was disabled when play moved to
-    // arbitrary maps, because that path had no map data to search - only the
-    // round's own Modal result. The static pack carries every corpus
-    // coordinate, so the original behaviour is available again: find the
-    // panorama nearest the player's guess and draw ITS neighbourhood beside
-    // the round's.
+    // The guess-side cloud uses the adaptive local visual sidecar. It considers
+    // every corpus view within 10 km; when fewer than 160 views are available,
+    // it expands to the nearest 160 without exceeding the 100 km cap. It then
+    // chooses the view that is visually closest to the round: exact when the
+    // view is in the round's top-300, otherwise the labeled projection
+    // estimate. If the sidecar cannot provide a view, the legacy round-match
+    // and nearest-corpus fallback below remains available.
     async guessNeighborhood(guess, context = {}, roundMatches = []) {
       const pack = root.LodestarPack;
       if (!pack || !guess) return null;
@@ -498,20 +497,44 @@
         // 1. The strongest of the ROUND's own matches inside the radius. This
         //    is exact - the similarity comes from the neighbour table, not an
         //    approximation - and it is the panorama that makes the visual case
-        //    for the guess. The old implementation instead took the 160 nearest
-        //    panoramas and scored them per view slot, which needs per-view
-        //    vectors; those were never written for this corpus (shards carry
-        //    only the fused vector), so that route is closed until a
-        //    re-extraction retains them.
-        // 2. Failing that, the nearest corpus panorama, so the guess side still
-        //    shows the local visual character even when nothing similar to the
-        //    round is anywhere near.
+        //    for the guess.
+        // 2. If the adaptive sidecar fails or is unavailable, use the nearest
+        //    corpus panorama so the legacy path still shows local character.
         const withinKm = Number(context.guessRadiusKm) || 50;
+        const roundPanoId = String(context.roundPanoId || "");
         let anchor = null;
         let anchorRank = null;
-        for (const match of roundMatches) {
-          const km = pack.haversineKm(latitude, longitude, match.latitude, match.longitude);
-          if (km <= withinKm) { anchor = { ...match, distanceKm: km }; anchorRank = match.rank; break; }
+        // Pack V2's geographic visual sidecar restores the 50k-era behavior at
+        // corpus scale: compare the round against a genuinely local candidate
+        // pool, rather than using geographic nearest as the visual answer.
+        if (pack.nearbyVisual && roundPanoId) {
+          const nearbyStarted = Date.now();
+          try {
+            anchor = await pack.nearbyVisual(latitude, longitude, {
+              roundPanoId,
+              roundMatches,
+              excludePanoId: roundPanoId,
+              minimumKm: Number(context.guessMinimumKm) || 10,
+              targetCandidates: Number(context.guessTargetCandidates) || 160,
+              maximumKm: Number(context.guessMaximumKm) || 100,
+            });
+            nearestMs = Date.now() - nearbyStarted;
+            anchorRank = anchor?.roundRank ?? null;
+          } catch (error) {
+            console.warn("[cradio] adaptive local visual search unavailable; using legacy anchor:",
+              error && error.message);
+          }
+        }
+        // Compatibility/failure fallback for packs without the visual sidecar.
+        if (!anchor) {
+          for (const match of roundMatches) {
+            const km = pack.haversineKm(latitude, longitude, match.latitude, match.longitude);
+            if (km <= withinKm) {
+              anchor = { ...match, distanceKm: km };
+              anchorRank = match.rank;
+              break;
+            }
+          }
         }
         // A guess in the ocean would otherwise anchor to whatever continent is
         // least far away - measured at 1,117 km for a mid-Pacific guess. The
@@ -537,7 +560,6 @@
         // rather than "not measured". Cosine similarity is symmetric, so the
         // round may appear in the ANCHOR's row; that gives the exact value for
         // free, out of a row already fetched.
-        const roundPanoId = String(context.roundPanoId || "");
         let reciprocal = null;
         if (anchorRank === null && roundPanoId) {
           const found = raw.matches.find((match) => match.panoId === roundPanoId);
@@ -546,9 +568,13 @@
         // Neither in the other's 300: fall back to the projected estimate,
         // which covers any pair in the corpus. Flagged as an estimate so the
         // display can say so - its mean error is 0.0145.
-        let estimated = false;
-        let similarityToRound = anchorRank ? anchor.similarity
-          : reciprocal ? reciprocal.similarity : null;
+        const anchorSimilarity = anchor.similarityToRound === null
+            || anchor.similarityToRound === undefined
+          ? null : Number(anchor.similarityToRound);
+        let similarityToRound = anchorRank ? (anchor.similarity ?? anchorSimilarity)
+          : reciprocal ? reciprocal.similarity
+          : Number.isFinite(anchorSimilarity) ? anchorSimilarity : null;
+        let estimated = anchor.estimated === true && !reciprocal && anchorRank === null;
         if (similarityToRound === null && roundPanoId && pack.similarityBetween) {
           const comparisonStarted = Date.now();
           const guess = await pack.similarityBetween(roundPanoId, anchor.panoId);
@@ -572,7 +598,9 @@
             nearestMs,
             rowMs,
             comparisonMs,
-            anchorSource: anchorRank === null ? "nearest-corpus" : "round-match",
+            anchorSource: anchor.selectedBy
+              ? (anchor.estimated ? "adaptive-local-projection" : "adaptive-local-exact")
+              : anchorRank === null ? "nearest-corpus" : "round-match",
           },
           guessAnchor: {
             panoId: anchor.panoId,
@@ -595,8 +623,11 @@
             // than the weakest of those.
             unmeasured: similarityToRound === null,
             estimated,
-            selectedBy: anchorRank ? "strongest round match within radius" : "nearest corpus panorama",
-            radiusKm: withinKm,
+            selectedBy: anchor.selectedBy
+              || (anchorRank ? "strongest round match within radius" : "nearest corpus panorama"),
+            radiusKm: Number(anchor.poolRadiusKm) || withinKm,
+            candidatePool: Number(anchor.candidatePool) || null,
+            poolRadiusKm: Number(anchor.poolRadiusKm) || null,
           },
         };
       } catch (error) {
@@ -667,6 +698,7 @@
         unmeasured: anchor.unmeasured === true,
         estimated: anchor.estimated === true,
         candidatePool: Number(anchor.candidatePool) || matches.length,
+        poolRadiusKm: Number(anchor.poolRadiusKm) || null,
       } : null;
       // A submitted guess always owns tile two. If there is no usable corpus
       // panorama near it, keep that place as an explanation instead of

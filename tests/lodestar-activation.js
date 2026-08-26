@@ -11,8 +11,8 @@ const source = fs.readFileSync(path.join(__dirname, "../src/lodestar-pack-v2.js"
 const userscript = fs.readFileSync(path.join(__dirname, "../src/geoguessr-meta-trainer.user.js"), "utf8");
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8"));
 const expected = {
-  baseUrl: "https://huggingface.co/datasets/riot1/lodestar-balanced-2m-neighbors-v2/resolve/362e0933a897fff88a54107c6aabf20d18aaa0f4",
-  revision: "362e0933a897fff88a54107c6aabf20d18aaa0f4",
+  baseUrl: "https://huggingface.co/datasets/riot1/lodestar-balanced-2m-neighbors-v2/resolve/cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91",
+  revision: "cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91",
   generation: "b6f99168d869873c",
   corpus: "lodestar-balanced-2m",
   corpusRows: 1999685,
@@ -25,9 +25,9 @@ assert.deepEqual(v2.defaultConfig(), {
   ...expected,
   cacheName: "lodestar-pack-v2-balanced-2m-b6f99168d869873c",
 });
-assert.equal(pkg.version, "2.2.0-beta.76");
-assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.76$/m);
-assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.76";/);
+assert.equal(pkg.version, "2.2.0-beta.77");
+assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.77$/m);
+assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.77";/);
 assert.match(expected.baseUrl, /^https:\/\/huggingface\.co\/datasets\/riot1\/lodestar-balanced-2m-neighbors-v2\/resolve\/[a-f0-9]{40}$/,
   "default source is a public immutable Hugging Face revision");
 assert.doesNotMatch(expected.baseUrl, /(?:hf_|wk-)[A-Za-z0-9_-]{20,}/,
@@ -54,7 +54,7 @@ v2.configure({ baseUrl: expected.baseUrl, manifest: verifiedManifest });
   await assert.rejects(v2.manifest(), /does not match verified 2M corpus/);
   v2.configure({
     baseUrl: expected.baseUrl,
-    manifest: { ...verifiedManifest, generation: "5a1bbde08350cd12" },
+    manifest: { ...verifiedManifest, generation: "stale-generation" },
   });
   await assert.rejects(v2.manifest(), /does not match verified 2M corpus/,
     "stale skewed-pack generation is rejected");

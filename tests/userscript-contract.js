@@ -119,7 +119,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.76/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.77/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -133,10 +133,16 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.76/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.77/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
+assert.match(source, /pack\.prefetchNearbyVisual\(latitude, longitude, \{[\s\S]{0,180}targetCandidates: 160/,
+  "guess submission warms the adaptive local visual pool before review");
+assert.match(source, /maximumKm: 100/,
+  "adaptive near-guess warming remains bounded for ocean and sparse guesses");
+assert.match(source, /best of \$\{mode\.guessMatch\.candidatePool\}<\/b> corpus views\$\{guessPoolScope\}/,
+  "the V-board receipt reports the actual adaptive pool and radius");
 assert.doesNotMatch(source, /127\.0\.0\.1|localhost|PRIVATE_LAYER_STORAGE_KEY|configurePrivateLocalLayer/,
   "the public userscript has no Florida/loopback integration or permission");
 assert.doesNotMatch(source, /privateLocalLayer/,

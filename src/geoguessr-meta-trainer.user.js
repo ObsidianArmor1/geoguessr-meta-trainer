@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.76
+// @version      2.2.0-beta.77
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.76
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.76
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.76
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.76
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.77
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.77
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.77
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.77
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.76";
+  const USERSCRIPT_VERSION = "2.2.0-beta.77";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -2434,8 +2434,14 @@
         : "Most consistent shared look among the nearest visual candidates.";
     const element = document.createElement("div");
     element.className = "omt-visual-board";
+    const guessPoolRadiusValue = mode.guessMatch?.poolRadiusKm;
+    const guessPoolRadius = guessPoolRadiusValue === null || guessPoolRadiusValue === undefined
+      ? null : Number(guessPoolRadiusValue);
+    const guessPoolScope = Number.isFinite(guessPoolRadius)
+      ? ` within ${guessPoolRadius < 10 ? guessPoolRadius.toFixed(1) : Math.round(guessPoolRadius)} km`
+      : " near your guess";
     const guessReceipt = mode.guessMatch
-      ? `<span><b>best of ${mode.guessMatch.candidatePool}</b> locations near your guess</span>`
+      ? `<span><b>best of ${mode.guessMatch.candidatePool}</b> corpus views${guessPoolScope}</span>`
       : mode.guessUnavailable
         ? "<span><b>No nearby comparison</b> available for your guess</span>"
         : "";
@@ -4204,6 +4210,14 @@
       state.guessPrefetchTimer = 0;
       let pending;
       pending = (async () => {
+        if (pack.prefetchNearbyVisual) {
+          await pack.prefetchNearbyVisual(latitude, longitude, {
+            minimumKm: 10,
+            targetCandidates: 160,
+            maximumKm: 100,
+          });
+          return;
+        }
         const anchor = await pack.nearest(latitude, longitude, { withinKm: 100 });
         if (!anchor) return;
         // pulls the anchor's row range into the cache, which is the slow part

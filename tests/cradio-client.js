@@ -81,6 +81,8 @@ async function main() {
       roundRank: 2,
       similarityToRound: 0.90,
       selectedBy: "strongest round match within radius",
+      candidatePool: 184,
+      poolRadiusKm: 10,
     },
   }, { tiles: 15 });
   assert.equal(
@@ -93,6 +95,8 @@ async function main() {
     false,
     "the guess-side example is not repeated among global ranked matches",
   );
+  assert.equal(guessBoard.modes[0].guessMatch.candidatePool, 184);
+  assert.equal(guessBoard.modes[0].guessMatch.poolRadiusKm, 10);
   const unavailableGuessBoard = boardClient.buildVisualBoard(adapted, null, {
     tiles: 8,
     guessExpected: true,
@@ -191,6 +195,48 @@ async function main() {
   assert.equal(packResult.response.cradio.corpus, "lodestar-1m");
   assert.equal(packQueries, 1);
   assert.equal(unexpectedCloudCalls, 0, "static lookup never consumes inference");
+  if (originalPack === undefined) delete globalThis.LodestarPack;
+  else globalThis.LodestarPack = originalPack;
+
+  let adaptiveOptions = null;
+  globalThis.LodestarPack = {
+    haversineKm: () => 1,
+    async nearbyVisual(_latitude, _longitude, options) {
+      adaptiveOptions = options;
+      return {
+        panoId: "adaptive-local",
+        latitude: 48.1,
+        longitude: 7.2,
+        heading: 91,
+        distanceKm: 4.2,
+        roundRank: null,
+        similarityToRound: 0.77,
+        estimated: true,
+        candidatePool: 203,
+        poolRadiusKm: 12.5,
+        selectedBy: "most visually similar projection in adaptive local pool",
+      };
+    },
+    async nearest() { throw new Error("nearest fallback must not replace adaptive local search"); },
+    async query(panoId) {
+      return { ...rawResponse, panoId, heading: 91, latitude: 48.1, longitude: 7.2 };
+    },
+  };
+  const adaptiveGuess = await new ModalCradioClient(storage()).guessNeighborhood(
+    { lat: 48, lng: 7 },
+    { roundPanoId: queryPano },
+    rawResponse.matches,
+  );
+  assert.equal(adaptiveOptions.excludePanoId, queryPano,
+    "the round itself cannot become its own near-guess example");
+  assert.equal(adaptiveOptions.minimumKm, 10);
+  assert.equal(adaptiveOptions.targetCandidates, 160);
+  assert.equal(adaptiveOptions.maximumKm, 100);
+  assert.equal(adaptiveGuess.guessAnchor.panoId, "adaptive-local");
+  assert.equal(adaptiveGuess.guessAnchor.candidatePool, 203);
+  assert.equal(adaptiveGuess.guessAnchor.poolRadiusKm, 12.5);
+  assert.equal(adaptiveGuess.guessAnchor.similarityToRound, 0.77);
+  assert.equal(adaptiveGuess.guessAnchor.estimated, true);
   if (originalPack === undefined) delete globalThis.LodestarPack;
   else globalThis.LodestarPack = originalPack;
 
