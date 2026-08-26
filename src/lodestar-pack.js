@@ -416,16 +416,9 @@
     return queryRow(row, count);
   }
 
-  // The optional private/local layer is deliberately injected above both
-  // public packs. It is serialized because the Pack V2 client has one mutable
-  // configuration object while the userscript temporarily points it at a
-  // loopback pack and restores the public default on a miss/failure.
-  let privateLayer = null;
+  // Serialize Pack V2 work so a click warm and the authoritative round lookup
+  // share the same fetch/decode work instead of issuing duplicate range reads.
   let v2Queue = Promise.resolve();
-
-  function configurePrivateLayer(layer) {
-    privateLayer = layer || null;
-  }
 
   function serialV2(task) {
     const result = v2Queue.then(task, task);
@@ -433,20 +426,8 @@
     return result;
   }
 
-  async function privateCall(method, args) {
-    if (!privateLayer || typeof privateLayer[method] !== "function") return null;
-    try {
-      return await privateLayer[method](...args);
-    } catch (error) {
-      console.warn(`[lodestar] private ${method} failed; using public fallback:`, error && error.message);
-      return null;
-    }
-  }
-
   async function query(panoId, count) {
     return serialV2(async () => {
-      const local = await privateCall("query", [panoId, count]);
-      if (local) return local;
       const v2 = root.LodestarPackV2;
       if (v2 && v2.available && v2.available()) {
         try {
@@ -462,8 +443,6 @@
 
   async function nearestPreferred(latitude, longitude, options) {
     return serialV2(async () => {
-      const local = await privateCall("nearest", [latitude, longitude, options]);
-      if (local) return local;
       const v2 = root.LodestarPackV2;
       if (v2 && v2.available && v2.available() && v2.nearest) {
         try {
@@ -479,8 +458,6 @@
 
   async function similarityBetween(panoIdA, panoIdB) {
     return serialV2(async () => {
-      const local = await privateCall("similarityBetween", [panoIdA, panoIdB]);
-      if (Number.isFinite(local)) return local;
       const v2 = root.LodestarPackV2;
       if (v2 && v2.available && v2.available() && v2.similarityBetween) {
         try {
@@ -553,6 +530,6 @@
   root.LodestarPack = {
     query, queryRow, nearest: nearestPreferred, directory, headings, headingOf, boundary,
     adaptiveCount, sphericalClick, half, haversineKm,
-    projectedVector, similarityBetween, configurePrivateLayer,
+    projectedVector, similarityBetween,
   };
 })(typeof window !== "undefined" ? window : globalThis);
