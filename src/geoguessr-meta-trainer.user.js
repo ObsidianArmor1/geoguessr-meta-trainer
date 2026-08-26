@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.69
+// @version      2.2.0-beta.70
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.69
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.70
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.69
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.70
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -46,7 +46,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.69";
+  const USERSCRIPT_VERSION = "2.2.0-beta.70";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -69,6 +69,8 @@
     transport: portableTransport,
   });
   const PENDING_EXPOSURE_STORAGE_KEY = "omt-pending-visual-exposure-v1";
+  const LIVE_GUESS_SESSION_KEY = "omt-live-challenge-guess-v1";
+  const LIVE_GUESS_MAX_AGE_MS = 6 * 60 * 60 * 1000;
   const INSTALL_ID_STORAGE_KEY = "omt-learner-install-id-v1";
   const EXPOSURE_SEQUENCE_STORAGE_KEY = "omt-learner-sequence-v1";
   const randomId = () => (
@@ -401,6 +403,8 @@
     round: null,
     playerGuess: null,
     pendingPlayerGuess: null,
+    liveChallengeChallengeId: null,
+    liveChallengeAnnouncedRound: null,
     requestToken: 0,
     root: null,
     shadow: null,
@@ -4594,6 +4598,32 @@
     );
   }
 
+  function rememberLiveChallengeGuess(challengeId, roundNumber, guess) {
+    const record = liveChallengeAdapter.storedGuessRecord(
+      challengeId,
+      roundNumber,
+      guess,
+    );
+    if (!record) return null;
+    try {
+      pageWindow.sessionStorage.setItem(LIVE_GUESS_SESSION_KEY, JSON.stringify(record));
+    } catch (_error) {}
+    return record.guess;
+  }
+
+  function rememberedLiveChallengeGuess(challengeId, roundNumber) {
+    try {
+      return liveChallengeAdapter.restoredGuess(
+        pageWindow.sessionStorage.getItem(LIVE_GUESS_SESSION_KEY),
+        challengeId,
+        roundNumber,
+        { maxAgeMs: LIVE_GUESS_MAX_AGE_MS },
+      );
+    } catch (_error) {
+      return null;
+    }
+  }
+
   async function liveChallengeProfileId() {
     if (state.liveChallengeProfileId) return state.liveChallengeProfileId;
     if (state.liveChallengeProfilePromise) return state.liveChallengeProfilePromise;
@@ -4628,20 +4658,30 @@
       liveChallengeProfileId(),
     ]);
     const lifecycle = liveChallengeAdapter.lifecycle(data, profileId);
+    state.liveChallengeChallengeId = challengeId;
+    state.liveChallengeAnnouncedRound = lifecycle.announcedRound;
+    const storedGuess = rememberedLiveChallengeGuess(challengeId, lifecycle.announcedRound);
     const pendingMatch = state.pendingPlayerGuess
       ? liveChallengeAdapter.matchingGuess(data, lifecycle.announcedRound, state.pendingPlayerGuess)
       : null;
     const round = normalizedLiveChallengeRound(data, challengeId, profileId);
-    if (round && pendingMatch) round.playerGuess = pendingMatch;
+    const apiGuess = round?.playerGuess || null;
+    const recoveredGuess = pendingMatch || storedGuess;
+    if (round && !round.playerGuess && recoveredGuess) round.playerGuess = recoveredGuess;
+    const guessSource = apiGuess
+      ? "api"
+      : pendingMatch ? "submitted-match" : storedGuess ? "session" : null;
     return {
       data,
       profileId,
-      lifecycle: pendingMatch
+      lifecycle: recoveredGuess
         ? { ...lifecycle, guessedRound: lifecycle.announcedRound, phase: "result" }
         : lifecycle,
       round,
       activeRound: liveChallengeAdapter.normalizeActiveRound(data, challengeId),
       pendingMatch,
+      storedGuess,
+      guessSource,
     };
   }
 
@@ -4657,10 +4697,14 @@
     let queueCheck = () => {};
 
     const captureSubmittedGuess = (url, body) => {
-      if (!liveChallengeIdFromUrl(url)) return;
+      const challengeId = liveChallengeIdFromUrl(url);
+      if (!challengeId) return;
       const guess = liveChallengeAdapter.submittedGuess(body);
       if (!guess) return;
       state.pendingPlayerGuess = guess;
+      if (state.liveChallengeChallengeId === challengeId) {
+        rememberLiveChallengeGuess(challengeId, state.liveChallengeAnnouncedRound, guess);
+      }
       state.guessPrefetchKey = "";
       prefetchGuessSide(guess.lat, guess.lng);
       queueCheck();
@@ -4758,6 +4802,8 @@
           hasProfileId: Boolean(liveState.profileId),
           hasPendingGuess: Boolean(state.pendingPlayerGuess),
           matchedPendingGuess: Boolean(liveState.pendingMatch),
+          hasStoredGuess: Boolean(liveState.storedGuess),
+          guessSource: liveState.guessSource,
           at: new Date().toISOString(),
         };
         if (apiPlaying || partyAwaitingResult || (!apiResult && !mounted)) {

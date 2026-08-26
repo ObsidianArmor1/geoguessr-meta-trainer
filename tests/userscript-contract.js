@@ -103,8 +103,8 @@ assert.match(source, /captureSubmittedGuess\(this\.__OMT_LIVE_URL, body\)/,
   "Live Challenge captures the user's authoritative outgoing XHR guess");
 assert.match(source, /liveChallengeAdapter\.matchingGuess\(data, lifecycle\.announcedRound, state\.pendingPlayerGuess\)/,
   "a submitted pin identifies the user's result even when GeoGuessr profile IDs drift");
-assert.match(source, /round\.playerGuess = pendingMatch/,
-  "the recovered Live Challenge guess reaches the shared round-end pipeline");
+assert.match(source, /round && !round\.playerGuess && recoveredGuess/,
+  "a recovered Live Challenge guess reaches the shared round-end pipeline without replacing API truth");
 assert.match(source, /\|\| state\.pendingPlayerGuess;/,
   "the shared review retains a final submitted-pin fallback for blue comparisons");
 assert.match(source, /if \(!state\.root\?\.isConnected\) render\(\)/,
@@ -119,7 +119,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.69/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.70/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -127,5 +127,11 @@ assert.match(source, /if \(apiPlaying \|\| partyAwaitingResult \|\| \(!apiResult
   "the Live poll clears review UI until GeoGuessr exposes the private-party result");
 assert.match(source, /if \(PARTY_LOBBY_PATH\.test\(location\.pathname\) && !liveChallengeResultMounted\(\)\) return;/,
   "an early private-party framework round_end cannot bypass the visible-result privacy gate");
+assert.match(source, /pageWindow\.sessionStorage\.setItem\(LIVE_GUESS_SESSION_KEY/,
+  "a submitted Live Challenge guess survives a same-tab reload");
+assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}roundNumber/,
+  "reload recovery is keyed to the exact challenge and round");
+assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
+  "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
 
 process.stdout.write("userscript architecture contract passed\n");
