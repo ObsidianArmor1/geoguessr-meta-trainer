@@ -189,6 +189,35 @@ assert.deepEqual(adapter.submittedGuess(JSON.stringify({ guess: {
 assert.deepEqual(adapter.submittedGuess("lat=12.3&lng=-45.6"), { lat: 12.3, lng: -45.6 });
 assert.equal(adapter.submittedGuess("not-json"), null);
 
+const storedGuess = adapter.storedGuessRecord(
+  "party-game",
+  3,
+  { latitude: 12.3, longitude: -45.6 },
+  1_000,
+);
+assert.deepEqual(storedGuess, {
+  challengeId: "party-game",
+  roundNumber: 3,
+  guess: { lat: 12.3, lng: -45.6 },
+  submittedAt: 1_000,
+});
+assert.deepEqual(adapter.restoredGuess(JSON.stringify(storedGuess), "party-game", 3, {
+  now: 2_000,
+  maxAgeMs: 2_000,
+}), { lat: 12.3, lng: -45.6 }, "the exact party round survives a same-tab reload");
+assert.equal(adapter.restoredGuess(storedGuess, "party-game", 4, {
+  now: 2_000,
+  maxAgeMs: 2_000,
+}), null, "a previous round guess cannot leak into the next round");
+assert.equal(adapter.restoredGuess(storedGuess, "another-game", 3, {
+  now: 2_000,
+  maxAgeMs: 2_000,
+}), null, "a guess cannot leak into another Live Challenge");
+assert.equal(adapter.restoredGuess(storedGuess, "party-game", 3, {
+  now: 4_000,
+  maxAgeMs: 2_000,
+}), null, "an expired submitted guess is discarded");
+
 const party = fixture("party");
 const noProfile = adapter.normalizeRound(party.payload, "party-game", null);
 assert.equal(noProfile.playerGuess, null, "another player's guess is never used without identity");

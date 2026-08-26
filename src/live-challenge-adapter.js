@@ -327,6 +327,41 @@
     return visit(value, 0);
   }
 
+  function storedGuessRecord(challengeId, roundNumber, guess, submittedAt = Date.now()) {
+    const normalizedGuess = coordinates(guess);
+    const normalizedRound = Number(roundNumber);
+    const normalizedTime = Number(submittedAt);
+    if (!scalar(challengeId) || !Number.isInteger(normalizedRound) || normalizedRound < 1
+        || !normalizedGuess || !Number.isFinite(normalizedTime)) return null;
+    return {
+      challengeId: String(challengeId),
+      roundNumber: normalizedRound,
+      guess: normalizedGuess,
+      submittedAt: normalizedTime,
+    };
+  }
+
+  function restoredGuess(recordValue, challengeId, roundNumber, options = {}) {
+    let record = recordValue;
+    if (typeof record === "string") {
+      try {
+        record = JSON.parse(record);
+      } catch (_error) {
+        return null;
+      }
+    }
+    const wantedRound = Number(roundNumber);
+    const now = Number(options.now ?? Date.now());
+    const maxAgeMs = Number(options.maxAgeMs ?? 6 * 60 * 60 * 1000);
+    const submittedAt = Number(record?.submittedAt);
+    if (!record || String(record.challengeId || "") !== String(challengeId || "")
+        || !Number.isInteger(wantedRound) || Number(record.roundNumber) !== wantedRound
+        || !Number.isFinite(now) || !Number.isFinite(maxAgeMs) || maxAgeMs < 0
+        || !Number.isFinite(submittedAt) || submittedAt > now
+        || now - submittedAt > maxAgeMs) return null;
+    return coordinates(record.guess);
+  }
+
   function numberFrom(value, paths) {
     for (const path of paths) {
       let current = value;
@@ -457,6 +492,8 @@
     lifecycle,
     matchingGuess,
     submittedGuess,
+    storedGuessRecord,
+    restoredGuess,
     normalizeRound,
     normalizeActiveRound,
     buildEventState,
