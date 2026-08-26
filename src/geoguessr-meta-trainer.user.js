@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.68
+// @version      2.2.0-beta.69
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.68
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.69
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.68
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.69
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -46,7 +46,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.68";
+  const USERSCRIPT_VERSION = "2.2.0-beta.69";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -4742,6 +4742,13 @@
         const apiResult = liveState.lifecycle.phase === "result";
         const apiPlaying = liveState.lifecycle.guessedRound > 0
           && liveState.lifecycle.guessedRound < liveState.lifecycle.announcedRound;
+        // In a private party, the API records this player's guess immediately,
+        // while GeoGuessr can still be showing "waiting for all players". That
+        // is not an authoritative round end: exposing the recommendation or
+        // comparison board then can help another player who is still guessing.
+        // The visible result map is the safe boundary. The one-second poll
+        // below will build the review as soon as GeoGuessr mounts it.
+        const partyAwaitingResult = PARTY_LOBBY_PATH.test(location.pathname) && !mounted;
         state.diagnostics.liveChallenge = {
           challengeId,
           announcedRound: liveState.lifecycle.announcedRound,
@@ -4753,7 +4760,7 @@
           matchedPendingGuess: Boolean(liveState.pendingMatch),
           at: new Date().toISOString(),
         };
-        if (apiPlaying || (!apiResult && !mounted)) {
+        if (apiPlaying || partyAwaitingResult || (!apiResult && !mounted)) {
           state.liveChallengeResultVisible = false;
           state.liveChallengePendingKey = "";
           if (state.review) clearRound();
@@ -5095,6 +5102,11 @@
           // Use the same complete review pipeline in every mode. The Live
           // Challenge adapter is now only a fallback/enrichment source; the
           // request-key quality gate in handleRoundEnd prevents races.
+          // Private-party GeoGuessr emits this event when the local player
+          // submits, before every player has finished. Its visible result map
+          // is the authoritative privacy boundary; the Live poll will invoke
+          // the shared pipeline once that map exists.
+          if (PARTY_LOBBY_PATH.test(location.pathname) && !liveChallengeResultMounted()) return;
           handleRoundEnd(event.detail);
         });
         pageWindow.GEFFetchEvents?.addEventListener("received_data", (event) => {

@@ -83,8 +83,8 @@ assert.doesNotMatch(source, /frameworkEnded/,
   "the single-player event framework's default state must not impersonate a Live result");
 assert.match(source, /liveChallengeAdapter\.lifecycle\(data, profileId\)/,
   "Live Challenge derives gameplay/result phase from its authenticated payload");
-assert.match(source, /if \(apiPlaying \|\| \(!apiResult && !mounted\)\)/,
-  "an advancing Live round clears the full post-round interface");
+assert.match(source, /if \(apiPlaying \|\| partyAwaitingResult \|\| \(!apiResult && !mounted\)\)/,
+  "an advancing or not-yet-revealed Live round clears the full post-round interface");
 assert.match(source, /window\.setInterval\(queueCheck, 1000\)/,
   "Live round transitions have a bounded fallback when GeoGuessr emits no usable event");
 assert.match(source, /function clearCompletedReviewForActiveRound\(roundNumber, locationValue\)/,
@@ -119,7 +119,13 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.68/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.69/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
+assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
+  "a private party does not treat this player's submitted guess as the round result");
+assert.match(source, /if \(apiPlaying \|\| partyAwaitingResult \|\| \(!apiResult && !mounted\)\)/,
+  "the Live poll clears review UI until GeoGuessr exposes the private-party result");
+assert.match(source, /if \(PARTY_LOBBY_PATH\.test\(location\.pathname\) && !liveChallengeResultMounted\(\)\) return;/,
+  "an early private-party framework round_end cannot bypass the visible-result privacy gate");
 
 process.stdout.write("userscript architecture contract passed\n");
