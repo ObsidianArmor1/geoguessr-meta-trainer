@@ -115,5 +115,9 @@ assert.match(source, /\.omt-board-current > img,\.omt-board-match > img \{[^}]*o
   "single-direction V-board thumbnails fill their cells instead of becoming a letterboxed square");
 assert.match(source, /image\.src = boardThumbnail \? resolved : fitViewToBox/,
   "V-board thumbnails retain the canonical embedding aspect on every browser");
+assert.match(source, /role: "nearGuessUnavailable"/,
+  "the V-board receipt records an unavailable near-guess comparison explicitly");
+assert.match(source, /No nearby view is available for this guess\./,
+  "the V-board explains why a submitted guess has no nearby comparison tile");
 
 process.stdout.write("userscript architecture contract passed\n");
