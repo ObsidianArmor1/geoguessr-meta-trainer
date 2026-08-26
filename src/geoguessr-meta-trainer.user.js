@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.74
+// @version      2.2.0-beta.75
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.74
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.74
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.74
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.74
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.75
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.75
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.75
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.75
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.74";
+  const USERSCRIPT_VERSION = "2.2.0-beta.75";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -2277,16 +2277,18 @@
       at: new Date().toISOString(),
     };
     state.diagnostics.boardImagery = receipt;
-    const waitForImage = (image) => {
-      if (image.complete) {
-        return image.naturalWidth > 0
-          ? Promise.resolve()
-          : Promise.reject(new Error("Street View tile unavailable"));
+    const waitForImage = async (image) => {
+      if (!image.complete) {
+        await new Promise((resolve, reject) => {
+          image.addEventListener("load", resolve, { once: true });
+          image.addEventListener("error", () => reject(new Error("Street View tile unavailable")), { once: true });
+        });
       }
-      return new Promise((resolve, reject) => {
-        image.addEventListener("load", resolve, { once: true });
-        image.addEventListener("error", () => reject(new Error("Street View tile unavailable")), { once: true });
-      });
+      if (!(image.naturalWidth > 0)) throw new Error("Street View tile unavailable");
+      // `load` means the bytes arrived, not necessarily that the browser has
+      // decoded every quadrant. Reveal only after all four are paint-ready so
+      // a sharp view cannot flash in one tile at a time.
+      if (typeof image.decode === "function") await image.decode();
     };
     for (const layer of layers) {
       Promise.all([...layer.querySelectorAll("img")].map(waitForImage)).then(() => {
@@ -2506,8 +2508,10 @@
       hidePeek();
     };
     startVisualExposure(mode.id, boardContent);
-    hydrateImages(element);
-    hydrateBoardDirectTiles(element);
+    // Always establish the complete low-resolution board first. Sharp tiles
+    // may download in parallel because their src attributes are already set,
+    // but none may replace a thumbnail until every thumbnail has decoded.
+    void hydrateImages(element).then(() => hydrateBoardDirectTiles(element));
   }
 
   async function warmVisualBoard(board) {
