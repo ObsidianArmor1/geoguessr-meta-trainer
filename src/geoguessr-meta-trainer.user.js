@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.70
+// @version      2.2.0-beta.71
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.70
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.71
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.71
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.70
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.71
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -46,7 +46,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.70";
+  const USERSCRIPT_VERSION = "2.2.0-beta.71";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -134,6 +134,8 @@
   const cradioClient = new cradioAdapter.ModalCradioClient();
 
   const PRIVATE_LAYER_STORAGE_KEY = "omt-private-local-pack-v1";
+  const PRIVATE_LAYER_REQUEST_TIMEOUT_MS = 1_500;
+  const PRIVATE_LAYER_OUTAGE_MS = 5 * 60 * 1000;
   const DEFAULT_PRIVATE_LAYER_CONFIG = {
     enabled: true,
     baseUrl: "http://127.0.0.1:8766/pack",
@@ -176,6 +178,7 @@
   let privateLayerLastError = null;
   let privatePackActive = false;
   let privateLayer = null;
+  let privateLayerProbePromise = null;
 
   function privatePackApi() {
     return pageWindow.LodestarPackV2 || window.LodestarPackV2;
@@ -200,7 +203,7 @@
           url,
           headers,
           responseType: "arraybuffer",
-          timeout: 3_000,
+          timeout: PRIVATE_LAYER_REQUEST_TIMEOUT_MS,
           onload: (response) => {
             if (response.status >= 200 && response.status < 300) {
               resolve({ buffer: response.response, status: response.status });
@@ -214,13 +217,33 @@
       });
     }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3_000);
+    const timer = setTimeout(() => controller.abort(), PRIVATE_LAYER_REQUEST_TIMEOUT_MS);
     return fetch(url, { headers, signal: controller.signal })
       .then(async (response) => ({
         buffer: await response.arrayBuffer(),
         status: response.status,
       }))
       .finally(() => clearTimeout(timer));
+  }
+
+  function probePrivateLayer() {
+    if (!privateLayerConfig.enabled || privateLayerProbePromise) return privateLayerProbePromise;
+    const manifestUrl = `${privateLayerConfig.baseUrl}/manifest.json`;
+    privateLayerProbePromise = privatePackTransport(manifestUrl)
+      .then(() => {
+        privateLayerLastError = null;
+        privateLayerOutageUntil = 0;
+        return true;
+      })
+      .catch((error) => {
+        privateLayerLastError = String(error?.message || error).slice(0, 240);
+        privateLayerOutageUntil = Date.now() + PRIVATE_LAYER_OUTAGE_MS;
+        return false;
+      })
+      .finally(() => {
+        privateLayerProbePromise = null;
+      });
+    return privateLayerProbePromise;
   }
 
   function ensurePrivatePack() {
@@ -251,7 +274,7 @@
       return null;
     } catch (error) {
       privateLayerLastError = String(error?.message || error).slice(0, 240);
-      privateLayerOutageUntil = Date.now() + 60_000;
+      privateLayerOutageUntil = Date.now() + PRIVATE_LAYER_OUTAGE_MS;
       restorePublicPack();
       return null;
     }
@@ -266,6 +289,7 @@
       active: privatePackActive,
       outageUntil: privateLayerOutageUntil || null,
       lastError: privateLayerLastError,
+      probing: Boolean(privateLayerProbePromise),
     };
   }
 
@@ -279,6 +303,10 @@
       diagnostics: privateLayerDiagnostics,
     };
     pack.configurePrivateLayer(privateLayer);
+    // Warm the loopback server and determine availability while the player is
+    // still in the lobby. A stopped private service must not add its timeout to
+    // the first red or blue corpus lookup after the round ends.
+    probePrivateLayer();
   }
 
   function configurePrivateLocalLayer() {
@@ -300,6 +328,7 @@
       privateLayerOutageUntil = 0;
       privateLayerLastError = null;
       persistPrivateLayerConfig();
+      probePrivateLayer();
       window.alert("Private local layer enabled; it will be tried before the public corpus.");
       return;
     }
@@ -333,6 +362,7 @@
       privateLayerLastError = null;
       restorePublicPack();
       persistPrivateLayerConfig();
+      probePrivateLayer();
       window.alert(`Private local layer saved at ${privateLayerConfig.baseUrl}.`);
     } catch (error) {
       window.alert(String(error?.message || error));
@@ -442,6 +472,7 @@
     dockColorsOpen: false,
     guessPrefetchKey: "",
     guessPrefetchTimer: 0,
+    guessPrefetchPromise: null,
     matchTooltipTimer: 0,
     matchTooltipToken: 0,
     hoveredMatchKey: null,
@@ -480,6 +511,7 @@
       errors: [],
       round: null,
       retrieval: null,
+      guessLookup: null,
       rendering: null,
       updatedAt: Date.now(),
     },
@@ -4322,23 +4354,33 @@
   // until the round ends, and a moved pin simply warms a different chunk. The
   // work is idempotent and cached, so repeated clicks cost nothing after the
   // first in a neighbourhood.
-  async function prefetchGuessSide(latitude, longitude) {
+  function prefetchGuessSide(latitude, longitude, options = {}) {
     const pack = pageWindow.LodestarPack || window.LodestarPack;
     if (!pack?.nearest) return;
     const key = `${latitude.toFixed(3)},${longitude.toFixed(3)}`;
-    if (state.guessPrefetchKey === key) return;
+    const immediate = options.immediate === true;
+    if (state.guessPrefetchKey === key && state.guessPrefetchPromise) return;
+    if (state.guessPrefetchKey === key && !immediate && state.guessPrefetchTimer) return;
     state.guessPrefetchKey = key;
     window.clearTimeout(state.guessPrefetchTimer);
-    state.guessPrefetchTimer = window.setTimeout(async () => {
-      try {
+    state.guessPrefetchTimer = 0;
+    const warm = () => {
+      state.guessPrefetchTimer = 0;
+      let pending;
+      pending = (async () => {
         const anchor = await pack.nearest(latitude, longitude, { withinKm: 100 });
         if (!anchor) return;
         // pulls the anchor's row range into the cache, which is the slow part
         await pack.query(anchor.panoId, 300);
-      } catch (_error) {
+      })().catch(() => {
         // a warm that fails costs nothing; the real load will try again
-      }
-    }, 250);
+      }).finally(() => {
+        if (state.guessPrefetchPromise === pending) state.guessPrefetchPromise = null;
+      });
+      state.guessPrefetchPromise = pending;
+    };
+    if (immediate) warm();
+    else state.guessPrefetchTimer = window.setTimeout(warm, 250);
   }
 
   function setupMapCapture() {
@@ -4386,6 +4428,7 @@
     state.roundRequestQuality = -1;
     state.diagnostics.round = null;
     state.diagnostics.retrieval = null;
+    state.diagnostics.guessLookup = null;
     state.diagnostics.rendering = null;
     diagnosticPhase("round-in-progress", { lastError: null });
     clearOverlays();
@@ -4518,6 +4561,15 @@
       return state.guessNeighborhood;
     }
     if (state.guessNeighborhoodPromise) return state.guessNeighborhoodPromise;
+    const guessLookupStarted = Date.now();
+    state.diagnostics.guessLookup = {
+      status: "loading",
+      durationMs: null,
+      matches: 0,
+      timing: null,
+      error: null,
+      at: new Date().toISOString(),
+    };
 
     // This data has two independent consumers: the optional guess map overlay
     // and the always-useful comparison-board tile. Load it once and let either
@@ -4543,8 +4595,23 @@
             `/api/guess-neighborhood/${review.location.mapIndex}?${query}`,
           );
         }
-        if (token !== state.requestToken || state.review !== review || !comparison) return null;
+        if (token !== state.requestToken || state.review !== review) return null;
+        if (!comparison) {
+          state.diagnostics.guessLookup = {
+            ...state.diagnostics.guessLookup,
+            status: "unavailable",
+            durationMs: Date.now() - guessLookupStarted,
+          };
+          return null;
+        }
         state.guessNeighborhood = comparison;
+        state.diagnostics.guessLookup = {
+          ...state.diagnostics.guessLookup,
+          status: "complete",
+          durationMs: Date.now() - guessLookupStarted,
+          matches: comparison.visualNeighborhood?.visualMatches?.length || 0,
+          timing: comparison.guessTiming || null,
+        };
         // A corpus board built before this lookup completed is incomplete. Make
         // the next render rebuild it with the near-guess tile in slot two.
         if (review.universal && state.visualBoard?.panoId === review.location?.panoId) {
@@ -4556,6 +4623,14 @@
         }
         return comparison;
       } catch (error) {
+        if (token === state.requestToken && state.review === review) {
+          state.diagnostics.guessLookup = {
+            ...state.diagnostics.guessLookup,
+            status: "failed",
+            durationMs: Date.now() - guessLookupStarted,
+            error: String(error?.message || error).slice(0, 240),
+          };
+        }
         console.error(
           review.universal
             ? "Meta Trainer: could not load guess-side cloud"
@@ -4706,7 +4781,7 @@
         rememberLiveChallengeGuess(challengeId, state.liveChallengeAnnouncedRound, guess);
       }
       state.guessPrefetchKey = "";
-      prefetchGuessSide(guess.lat, guess.lng);
+      prefetchGuessSide(guess.lat, guess.lng, { immediate: true });
       queueCheck();
     };
 

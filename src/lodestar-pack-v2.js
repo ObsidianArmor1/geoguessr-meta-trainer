@@ -26,37 +26,76 @@
   const MAX_MEMORY_GEO_TILES = 32;
 
   let settings = { baseUrl: DEFAULT_BASE_URL };
+  const transportIds = new WeakMap();
+  let nextTransportId = 1;
+  const configurationStates = new Map();
+  let configurationKey = "";
   let manifestPromise = null;
-  const indexCache = new Map();
-  const rowCache = new Map();
-  const geoTileCache = new Map();
+  let indexCache = new Map();
+  let rowCache = new Map();
+  let geoTileCache = new Map();
   let occupancyPromise = null;
-  const runtime = {
-    configured: true,
-    manifest: "idle",
-    manifestError: null,
-    cache: { hits: 0, misses: 0, readErrors: 0, writeErrors: 0, memoryHits: 0 },
-    network: {
-      requests: 0, rangeRequests: 0, failures: 0, bytes: 0,
-      lastStatus: null, lastRangeStatus: null, lastDurationMs: null, lastError: null,
-    },
-    lastQuery: null,
-  };
+
+  function freshRuntime() {
+    return {
+      configured: available(),
+      manifest: "idle",
+      manifestError: null,
+      cache: { hits: 0, misses: 0, readErrors: 0, writeErrors: 0, memoryHits: 0 },
+      network: {
+        requests: 0, rangeRequests: 0, failures: 0, bytes: 0,
+        lastStatus: null, lastRangeStatus: null, lastDurationMs: null, lastError: null,
+      },
+      lastQuery: null,
+    };
+  }
+
+  let runtime = freshRuntime();
+
+  function settingsKey(value) {
+    if (!value) return "disabled";
+    let transportId = "default";
+    if (typeof value.transport === "function") {
+      if (!transportIds.has(value.transport)) transportIds.set(value.transport, nextTransportId++);
+      transportId = `transport-${transportIds.get(value.transport)}`;
+    }
+    const manifestIdentity = value.manifest
+      ? JSON.stringify(value.manifest)
+      : String(value.manifestUrl || "");
+    return `${String(value.baseUrl || "")}|${transportId}|${manifestIdentity}`;
+  }
+
+  function saveConfigurationState() {
+    if (!configurationKey) return;
+    configurationStates.set(configurationKey, {
+      manifestPromise,
+      indexCache,
+      rowCache,
+      geoTileCache,
+      occupancyPromise,
+      runtime,
+    });
+  }
+
+  function activateConfigurationState(key) {
+    const saved = configurationStates.get(key);
+    if (saved) {
+      ({ manifestPromise, indexCache, rowCache, geoTileCache, occupancyPromise, runtime } = saved);
+      runtime.configured = available();
+      return;
+    }
+    manifestPromise = null;
+    indexCache = new Map();
+    rowCache = new Map();
+    geoTileCache = new Map();
+    occupancyPromise = null;
+    runtime = freshRuntime();
+  }
+
+  configurationKey = settingsKey(settings);
 
   function errorText(error) {
     return String(error?.message || error || "unknown error").slice(0, 240);
-  }
-
-  function resetRuntime() {
-    runtime.configured = available();
-    runtime.manifest = "idle";
-    runtime.manifestError = null;
-    runtime.cache = { hits: 0, misses: 0, readErrors: 0, writeErrors: 0, memoryHits: 0 };
-    runtime.network = {
-      requests: 0, rangeRequests: 0, failures: 0, bytes: 0,
-      lastStatus: null, lastRangeStatus: null, lastDurationMs: null, lastError: null,
-    };
-    runtime.lastQuery = null;
   }
 
   function diagnostics() {
@@ -75,15 +114,12 @@
   }
 
   function configure(options) {
+    saveConfigurationState();
     settings = options === undefined
       ? { baseUrl: DEFAULT_BASE_URL }
       : (options ? { ...options } : null);
-    manifestPromise = null;
-    indexCache.clear();
-    rowCache.clear();
-    geoTileCache.clear();
-    occupancyPromise = null;
-    resetRuntime();
+    configurationKey = settingsKey(settings);
+    activateConfigurationState(configurationKey);
   }
 
   function defaultConfig() {
