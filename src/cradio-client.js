@@ -484,6 +484,10 @@
     async guessNeighborhood(guess, context = {}, roundMatches = []) {
       const pack = root.LodestarPack;
       if (!pack || !guess) return null;
+      const started = Date.now();
+      let nearestMs = 0;
+      let rowMs = 0;
+      let comparisonMs = 0;
       const latitude = Number(guess.lat ?? guess.latitude);
       const longitude = Number(guess.lng ?? guess.longitude);
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
@@ -514,11 +518,15 @@
         // original could not do this because it searched only the map's own
         // panoramas; a corpus-wide search needs the cap put back explicitly.
         if (!anchor) {
+          const nearestStarted = Date.now();
           anchor = await pack.nearest(latitude, longitude, { withinKm: 100 });
+          nearestMs = Date.now() - nearestStarted;
           anchorRank = null;
         }
         if (!anchor) return null;
+        const rowStarted = Date.now();
         const raw = await pack.query(anchor.panoId, 300);
+        rowMs = Date.now() - rowStarted;
         if (!raw) return null;
         // How similar the anchor actually is to the round.
         //
@@ -542,7 +550,9 @@
         let similarityToRound = anchorRank ? anchor.similarity
           : reciprocal ? reciprocal.similarity : null;
         if (similarityToRound === null && roundPanoId && pack.similarityBetween) {
+          const comparisonStarted = Date.now();
           const guess = await pack.similarityBetween(roundPanoId, anchor.panoId);
+          comparisonMs = Date.now() - comparisonStarted;
           if (Number.isFinite(guess)) {
             similarityToRound = guess;
             estimated = true;
@@ -557,6 +567,13 @@
         });
         return {
           ...adapted,
+          guessTiming: {
+            totalMs: Date.now() - started,
+            nearestMs,
+            rowMs,
+            comparisonMs,
+            anchorSource: anchorRank === null ? "nearest-corpus" : "round-match",
+          },
           guessAnchor: {
             panoId: anchor.panoId,
             latitude: anchor.latitude,

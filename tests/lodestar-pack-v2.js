@@ -29,20 +29,22 @@ function arrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 
-pack.configure({
+const testTransport = async (url, options = {}) => {
+  if (options.range) {
+    const length = options.range.end - options.range.start + 1;
+    const handle = fs.openSync(url, "r");
+    const buffer = Buffer.alloc(length);
+    fs.readSync(handle, buffer, 0, length, options.range.start);
+    fs.closeSync(handle);
+    return { buffer: arrayBuffer(buffer), status: 206 };
+  }
+  return { buffer: arrayBuffer(fs.readFileSync(url)), status: 200 };
+};
+const testConfig = {
   baseUrl: output,
-  transport: async (url, options = {}) => {
-    if (options.range) {
-      const length = options.range.end - options.range.start + 1;
-      const handle = fs.openSync(url, "r");
-      const buffer = Buffer.alloc(length);
-      fs.readSync(handle, buffer, 0, length, options.range.start);
-      fs.closeSync(handle);
-      return { buffer: arrayBuffer(buffer), status: 206 };
-    }
-    return { buffer: arrayBuffer(fs.readFileSync(url)), status: 200 };
-  },
-});
+  transport: testTransport,
+};
+pack.configure(testConfig);
 
 function half(bits) {
   const sign = (bits & 0x8000) ? -1 : 1;
@@ -111,6 +113,19 @@ function half(bits) {
   assert.equal(repeated.cacheHit, true, "a repeated query is served without transport");
   assert.equal(pack.diagnostics().lastQuery.cacheHit, true);
   assert.ok(pack.diagnostics().cache.memoryHits > 0);
+
+  const publicRequests = pack.diagnostics().network.requests;
+  pack.configure({
+    baseUrl: "private-test",
+    manifest: { format: "lodestar-range-row-pack", version: 2 },
+    transport: async () => { throw new Error("the isolated test layer should not fetch"); },
+  });
+  pack.configure(testConfig);
+  const afterLayerSwitch = await pack.query(sourcePano, 300);
+  assert.equal(afterLayerSwitch.cacheHit, true,
+    "switching away and back preserves the public Pack V2 row cache");
+  assert.equal(pack.diagnostics().network.requests, publicRequests,
+    "a private-layer probe cannot evict warm public pack data");
 
   let manifestAttempts = 0;
   pack.configure({
