@@ -416,59 +416,47 @@
     return queryRow(row, count);
   }
 
-  // Serialize Pack V2 work so a click warm and the authoritative round lookup
-  // share the same fetch/decode work instead of issuing duplicate range reads.
-  let v2Queue = Promise.resolve();
-
-  function serialV2(task) {
-    const result = v2Queue.then(task, task);
-    v2Queue = result.catch(() => undefined);
-    return result;
-  }
-
   async function query(panoId, count) {
-    return serialV2(async () => {
-      const v2 = root.LodestarPackV2;
-      if (v2 && v2.available && v2.available()) {
-        try {
-          const result = await v2.query(panoId, count);
-          if (result) return result;
-        } catch (error) {
-          console.warn("[lodestar] Pack V2 query failed; using V1:", error && error.message);
-        }
+    // Round lookups are authoritative and must never queue behind speculative
+    // guess-side warming. Pack V2's immutable reads and caches are safe to use
+    // concurrently; serializing them caused one slow spatial lookup to leave
+    // every later round stuck on "similarity warming...".
+    const v2 = root.LodestarPackV2;
+    if (v2 && v2.available && v2.available()) {
+      try {
+        const result = await v2.query(panoId, count);
+        if (result) return result;
+      } catch (error) {
+        console.warn("[lodestar] Pack V2 query failed; using V1:", error && error.message);
       }
-      return queryV1(panoId, count);
-    });
+    }
+    return queryV1(panoId, count);
   }
 
   async function nearestPreferred(latitude, longitude, options) {
-    return serialV2(async () => {
-      const v2 = root.LodestarPackV2;
-      if (v2 && v2.available && v2.available() && v2.nearest) {
-        try {
-          const result = await v2.nearest(latitude, longitude, options);
-          if (result) return result;
-        } catch (error) {
-          console.warn("[lodestar] Pack V2 spatial lookup failed; using V1:", error && error.message);
-        }
+    const v2 = root.LodestarPackV2;
+    if (v2 && v2.available && v2.available() && v2.nearest) {
+      try {
+        const result = await v2.nearest(latitude, longitude, options);
+        if (result) return result;
+      } catch (error) {
+        console.warn("[lodestar] Pack V2 spatial lookup failed; using V1:", error && error.message);
       }
-      return nearest(latitude, longitude, options);
-    });
+    }
+    return nearest(latitude, longitude, options);
   }
 
   async function similarityBetween(panoIdA, panoIdB) {
-    return serialV2(async () => {
-      const v2 = root.LodestarPackV2;
-      if (v2 && v2.available && v2.available() && v2.similarityBetween) {
-        try {
-          const result = await v2.similarityBetween(panoIdA, panoIdB);
-          if (Number.isFinite(result)) return result;
-        } catch (error) {
-          console.warn("[lodestar] Pack V2 projection failed; using V1:", error && error.message);
-        }
+    const v2 = root.LodestarPackV2;
+    if (v2 && v2.available && v2.available() && v2.similarityBetween) {
+      try {
+        const result = await v2.similarityBetween(panoIdA, panoIdB);
+        if (Number.isFinite(result)) return result;
+      } catch (error) {
+        console.warn("[lodestar] Pack V2 projection failed; using V1:", error && error.message);
       }
-      return similarityBetweenV1(panoIdA, panoIdB);
-    });
+    }
+    return similarityBetweenV1(panoIdA, panoIdB);
   }
 
   async function queryRow(row, count) {
