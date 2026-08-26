@@ -119,5 +119,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.68/,
+  "Tampermonkey receives a fresh comparison client when its board behavior changes");
 
 process.stdout.write("userscript architecture contract passed\n");
