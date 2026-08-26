@@ -116,16 +116,16 @@ function half(bits) {
 
   const publicRequests = pack.diagnostics().network.requests;
   pack.configure({
-    baseUrl: "private-test",
+    baseUrl: "alternate-test",
     manifest: { format: "lodestar-range-row-pack", version: 2 },
-    transport: async () => { throw new Error("the isolated test layer should not fetch"); },
+    transport: async () => { throw new Error("the alternate test configuration should not fetch"); },
   });
   pack.configure(testConfig);
   const afterLayerSwitch = await pack.query(sourcePano, 300);
   assert.equal(afterLayerSwitch.cacheHit, true,
     "switching away and back preserves the public Pack V2 row cache");
   assert.equal(pack.diagnostics().network.requests, publicRequests,
-    "a private-layer probe cannot evict warm public pack data");
+    "an alternate configuration cannot evict warm public pack data");
 
   let manifestAttempts = 0;
   pack.configure({
