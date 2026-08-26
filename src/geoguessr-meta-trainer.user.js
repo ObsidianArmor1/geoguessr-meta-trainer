@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.77
+// @version      2.2.0-beta.78
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.77
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.77
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.77
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.77
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.78
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.78
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.78
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.78
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.77";
+  const USERSCRIPT_VERSION = "2.2.0-beta.78";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -789,22 +789,9 @@
     return `https://streetviewpixels-pa.googleapis.com/v1/thumbnail?${query}`;
   }
 
-  function corpusTileUrl(panoId, x, y, zoom = 3) {
-    const query = new URLSearchParams({
-      cb_client: "apiv3",
-      panoid: String(panoId),
-      x: String(x),
-      y: String(y),
-      zoom: String(zoom),
-      nbt: "1",
-      fover: "2",
-    });
-    return `https://streetviewpixels-pa.googleapis.com/v1/tile?${query}`;
-  }
-
   // Refit a Street View thumbnail to the box it will be drawn in.
   //
-  // The tiles are a 3x3 grid sized by the window, so their aspect follows the
+  // Board cells are sized by the window, so their aspect follows the
   // viewport, while the thumbnails are a fixed 448x256 - the geometry the
   // corpus was EMBEDDED at. `object-fit: contain` then letterboxes the
   // difference. `thumbfov` is the HORIZONTAL field of view, so asking for a
@@ -1213,14 +1200,6 @@
        return a near-square result on some browsers, which contain then
        letterboxes into a narrow square in the middle of the cell. */
     .omt-board-current > img,.omt-board-match > img { display:block; width:100%; height:100%; object-fit:cover; object-position:center; }
-    .omt-board-direct { position:absolute; z-index:1; inset:0; overflow:hidden; opacity:0; background:#050607; transition:opacity 90ms linear; pointer-events:none; }
-    .omt-board-direct.ready { opacity:1; }
-    .omt-board-direct-sheet { position:absolute; left:0; top:50%; width:100%; aspect-ratio:1; transform:translateY(-50%); }
-    .omt-board-direct-sheet img { position:absolute; display:block; width:50.1%; height:50.1%; max-width:none; object-fit:fill; }
-    .omt-board-direct-sheet img:nth-child(1) { left:0; top:0; }
-    .omt-board-direct-sheet img:nth-child(2) { left:50%; top:0; }
-    .omt-board-direct-sheet img:nth-child(3) { left:0; top:50%; }
-    .omt-board-direct-sheet img:nth-child(4) { left:50%; top:50%; }
     /* Four-direction grids. minmax(0,1fr) rather than 1fr, because the implicit
        minimum of 1fr is the image's intrinsic 256px - which makes the rows
        uneven and overflows the box. These rules belong in THIS sheet: the file
@@ -2247,65 +2226,11 @@
   // panorama, which is what the dot previews have always done.
   function tileImages(panoId, heading, attributes, alt) {
     if (!state.boardAllDirections || !panoId || !Number.isFinite(Number(heading))) {
-      const placeholder = `<img data-src="${esc(corpusViewUrl(panoId, heading))}" ${attributes} alt="${esc(alt)}">`;
-      if (!panoId || !Number.isFinite(Number(heading))) return placeholder;
-      // Pack headings are the panorama tile-set center headings. At zoom 3 a
-      // 90-degree view is exactly the middle two horizontal tiles. The middle
-      // two vertical tiles straddle pitch zero. Keeping the ordinary thumbnail
-      // underneath until all four decode avoids partial seams and aspect snaps.
-      const direct = [[3, 1], [4, 1], [3, 2], [4, 2]].map(([x, y]) => (
-        `<img src="${esc(corpusTileUrl(panoId, x, y))}" loading="eager" decoding="async" alt="">`
-      )).join("");
-      return `${placeholder}<div class="omt-board-direct" aria-hidden="true">`
-        + `<div class="omt-board-direct-sheet">${direct}</div></div>`;
+      return `<img data-src="${esc(corpusViewUrl(panoId, heading))}" ${attributes} alt="${esc(alt)}">`;
     }
     return `<div class="omt-board-quad">` + [0, 90, 180, 270].map((offset, slot) =>
       `<img data-src="${esc(corpusViewUrl(panoId, Number(heading) + offset))}" ${attributes} `
       + `alt="${esc(alt)}, direction ${slot + 1}">`).join("") + `</div>`;
-  }
-
-  function hydrateBoardDirectTiles(scope) {
-    const layers = [...scope.querySelectorAll(".omt-board-direct")];
-    if (!layers.length) return;
-    const receipt = {
-      status: "loading",
-      mode: "street-view-tiles",
-      views: layers.length,
-      requestedTiles: layers.length * 4,
-      readyViews: 0,
-      failedViews: 0,
-      at: new Date().toISOString(),
-    };
-    state.diagnostics.boardImagery = receipt;
-    const waitForImage = async (image) => {
-      if (!image.complete) {
-        await new Promise((resolve, reject) => {
-          image.addEventListener("load", resolve, { once: true });
-          image.addEventListener("error", () => reject(new Error("Street View tile unavailable")), { once: true });
-        });
-      }
-      if (!(image.naturalWidth > 0)) throw new Error("Street View tile unavailable");
-      // `load` means the bytes arrived, not necessarily that the browser has
-      // decoded every quadrant. Reveal only after all four are paint-ready so
-      // a sharp view cannot flash in one tile at a time.
-      if (typeof image.decode === "function") await image.decode();
-    };
-    for (const layer of layers) {
-      Promise.all([...layer.querySelectorAll("img")].map(waitForImage)).then(() => {
-        if (!layer.isConnected) return;
-        layer.classList.add("ready");
-        receipt.readyViews += 1;
-        receipt.status = receipt.readyViews + receipt.failedViews === receipt.views
-          ? (receipt.failedViews ? "partial" : "complete")
-          : "loading";
-      }).catch(() => {
-        receipt.failedViews += 1;
-        receipt.status = receipt.readyViews + receipt.failedViews === receipt.views
-          ? (receipt.readyViews ? "partial" : "failed")
-          : "loading";
-        layer.remove();
-      });
-    }
   }
 
   // The enlarged view, built in one place so its two modes cannot half-apply.
@@ -2514,10 +2439,9 @@
       hidePeek();
     };
     startVisualExposure(mode.id, boardContent);
-    // Always establish the complete low-resolution board first. Sharp tiles
-    // may download in parallel because their src attributes are already set,
-    // but none may replace a thumbnail until every thumbnail has decoded.
-    void hydrateImages(element).then(() => hydrateBoardDirectTiles(element));
+    // Establish the complete heading-aware thumbnail board before interaction
+    // can construct an enlarged native Street View view.
+    void hydrateImages(element);
   }
 
   async function warmVisualBoard(board) {

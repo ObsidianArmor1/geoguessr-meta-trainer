@@ -119,7 +119,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.77/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.78/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -133,7 +133,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.77/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.78/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
@@ -147,19 +147,21 @@ assert.doesNotMatch(source, /127\.0\.0\.1|localhost|PRIVATE_LAYER_STORAGE_KEY|co
   "the public userscript has no Florida/loopback integration or permission");
 assert.doesNotMatch(source, /privateLocalLayer/,
   "public diagnostics contain no private Florida layer state");
-assert.match(source, /function corpusTileUrl\(panoId, x, y, zoom = 3\)/,
-  "the V board can request high-resolution Street View panorama tiles directly");
-assert.match(source, /\[\[3, 1\], \[4, 1\], \[3, 2\], \[4, 2\]\]/,
-  "each road-aligned board view is assembled from the four zoom-3 tiles around pitch zero");
-assert.match(source, /Promise\.all\(\[\.\.\.layer\.querySelectorAll\("img"\)\]\.map\(waitForImage\)\)/,
-  "a direct board view replaces its thumbnail only after every tile has loaded");
-assert.match(source, /if \(typeof image\.decode === "function"\) await image\.decode\(\);[\s\S]{0,500}layer\.classList\.add\("ready"\)/,
-  "a direct board view is fully decoded before its four tiles become visible");
-assert.match(source, /hydrateImages\(element\)\.then\(\(\) => hydrateBoardDirectTiles\(element\)\)/,
-  "the complete thumbnail board is established before sharp tile layers can reveal");
+const tileImagesBody = source.slice(
+  source.indexOf("function tileImages("),
+  source.indexOf("// The enlarged view, built in one place"),
+);
+assert.match(tileImagesBody, /data-src="\$\{esc\(corpusViewUrl\(panoId, heading\)\)\}"/,
+  "normal V-board cells use the canonical heading-aware panorama thumbnail");
+assert.doesNotMatch(tileImagesBody, /corpusTileUrl|omt-board-direct|\[\[3, 1\], \[4, 1\], \[3, 2\], \[4, 2\]\]/,
+  "normal V-board cells do not use fixed raw panorama tile columns");
+assert.match(tileImagesBody, /\[0, 90, 180, 270\]\.map\([\s\S]*corpusViewUrl\(panoId, Number\(heading\) \+ offset\)/,
+  "four-direction board mode retains heading-aware thumbnails");
+assert.match(source, /void hydrateImages\(element\);/,
+  "the heading-aware thumbnail board still uses normal image hydration");
+assert.doesNotMatch(source, /corpusTileUrl|omt-board-direct|hydrateBoardDirectTiles/,
+  "fixed direct-tile replacement and its stale hydration path are removed");
 assert.match(source, /Visual similarity temporarily unavailable \(public corpus request failed\)/,
   "a public-pack failure is not concealed by an unrelated Modal fallback status");
-assert.doesNotMatch(source, /hydrateBoardDirectTiles[\s\S]{0,1200}StreetViewPanorama/,
-  "sharper board cells do not allocate additional native Street View renderers");
 
 process.stdout.write("userscript architecture contract passed\n");
