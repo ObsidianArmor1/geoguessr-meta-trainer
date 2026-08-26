@@ -143,6 +143,47 @@ function half(bits) {
   assert.equal(pack.diagnostics().manifest, "ready");
   assert.equal(manifestAttempts, 2);
 
+  // Concurrent consumers (round review plus guess-side warming) must share
+  // identical index and row reads rather than burst duplicate CDN requests.
+  let concurrentRequests = 0;
+  const concurrentTransport = async (url, options = {}) => {
+    concurrentRequests += 1;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return testTransport(url, options);
+  };
+  pack.configure({ baseUrl: output, transport: concurrentTransport });
+  const [concurrentA, concurrentB] = await Promise.all([
+    pack.query(sourcePano, 300),
+    pack.query(sourcePano, 300),
+  ]);
+  assert.equal(concurrentA.panoId, sourcePano);
+  assert.equal(concurrentB.panoId, sourcePano);
+  assert.equal(concurrentRequests, 3,
+    "two simultaneous identical queries share manifest, index, and row requests");
+  assert.ok(pack.diagnostics().cache.inflightHits >= 2,
+    "in-flight request sharing is visible in diagnostics");
+
+  // A brief public-host 429 should recover locally instead of falling through
+  // to the unrelated private Modal endpoint and surfacing its 404.
+  let rateLimitedRequests = 0;
+  pack.configure({
+    baseUrl: output,
+    retryDelayMs: 0,
+    transport: async (url, options = {}) => {
+      rateLimitedRequests += 1;
+      if (rateLimitedRequests <= 2) {
+        const error = new Error(`${url} -> HTTP 429`);
+        error.status = 429;
+        throw error;
+      }
+      return testTransport(url, options);
+    },
+  });
+  const recovered = await pack.query(sourcePano, 300);
+  assert.equal(recovered.panoId, sourcePano);
+  assert.equal(pack.diagnostics().network.retries, 2,
+    "Pack V2 retries transient rate limits with bounded backoff");
+
   fs.rmSync(output, { recursive: true, force: true });
   process.stdout.write("Lodestar Pack V2 exact-parity test passed\n");
 })().catch((error) => {

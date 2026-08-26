@@ -34,6 +34,8 @@
   let indexCache = new Map();
   let rowCache = new Map();
   let geoTileCache = new Map();
+  let blobInflight = new Map();
+  let rowInflight = new Map();
   let occupancyPromise = null;
 
   function freshRuntime() {
@@ -41,10 +43,12 @@
       configured: available(),
       manifest: "idle",
       manifestError: null,
-      cache: { hits: 0, misses: 0, readErrors: 0, writeErrors: 0, memoryHits: 0 },
+      cache: {
+        hits: 0, misses: 0, readErrors: 0, writeErrors: 0, memoryHits: 0, inflightHits: 0,
+      },
       network: {
         requests: 0, rangeRequests: 0, failures: 0, bytes: 0,
-        lastStatus: null, lastRangeStatus: null, lastDurationMs: null, lastError: null,
+        retries: 0, lastStatus: null, lastRangeStatus: null, lastDurationMs: null, lastError: null,
       },
       lastQuery: null,
     };
@@ -72,6 +76,8 @@
       indexCache,
       rowCache,
       geoTileCache,
+      blobInflight,
+      rowInflight,
       occupancyPromise,
       runtime,
     });
@@ -80,7 +86,10 @@
   function activateConfigurationState(key) {
     const saved = configurationStates.get(key);
     if (saved) {
-      ({ manifestPromise, indexCache, rowCache, geoTileCache, occupancyPromise, runtime } = saved);
+      ({
+        manifestPromise, indexCache, rowCache, geoTileCache, blobInflight, rowInflight,
+        occupancyPromise, runtime,
+      } = saved);
       runtime.configured = available();
       return;
     }
@@ -88,6 +97,8 @@
     indexCache = new Map();
     rowCache = new Map();
     geoTileCache = new Map();
+    blobInflight = new Map();
+    rowInflight = new Map();
     occupancyPromise = null;
     runtime = freshRuntime();
   }
@@ -147,55 +158,70 @@
   }
 
   async function transport(url, options = {}) {
-    const started = Date.now();
     const ranged = Boolean(options.range);
-    runtime.network.requests += 1;
-    if (ranged) runtime.network.rangeRequests += 1;
-    try {
-      let result;
-      if (settings && typeof settings.transport === "function") {
-        result = await settings.transport(url, options);
-      } else if (typeof GM_xmlhttpRequest === "function") {
-        result = await new Promise((resolve, reject) => {
-          GM_xmlhttpRequest({
-            method: "GET",
-            url,
-            headers: ranged
-              ? { Range: `bytes=${options.range.start}-${options.range.end}` }
-              : undefined,
-            responseType: "arraybuffer",
-            timeout: 60000,
-            onload: (response) => {
-              if (response.status >= 200 && response.status < 300) {
-                resolve({ buffer: response.response, status: response.status });
-              } else {
-                reject(new Error(`${url} -> HTTP ${response.status}`));
-              }
-            },
-            onerror: () => reject(new Error(`${url} -> network error`)),
-            ontimeout: () => reject(new Error(`${url} -> timeout`)),
+    const retryDelays = [750, 2000];
+    for (let attempt = 0; ; attempt += 1) {
+      const started = Date.now();
+      runtime.network.requests += 1;
+      if (ranged) runtime.network.rangeRequests += 1;
+      try {
+        let result;
+        if (settings && typeof settings.transport === "function") {
+          result = await settings.transport(url, options);
+        } else if (typeof GM_xmlhttpRequest === "function") {
+          result = await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+              method: "GET",
+              url,
+              headers: ranged
+                ? { Range: `bytes=${options.range.start}-${options.range.end}` }
+                : undefined,
+              responseType: "arraybuffer",
+              timeout: 60000,
+              onload: (response) => {
+                if (response.status >= 200 && response.status < 300) {
+                  resolve({ buffer: response.response, status: response.status });
+                } else {
+                  const error = new Error(`${url} -> HTTP ${response.status}`);
+                  error.status = response.status;
+                  reject(error);
+                }
+              },
+              onerror: () => reject(new Error(`${url} -> network error`)),
+              ontimeout: () => reject(new Error(`${url} -> timeout`)),
+            });
           });
-        });
-      } else {
-        const headers = ranged
-          ? { Range: `bytes=${options.range.start}-${options.range.end}` }
-          : undefined;
-        const response = await fetch(url, { headers });
-        if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
-        result = { buffer: await response.arrayBuffer(), status: response.status };
+        } else {
+          const headers = ranged
+            ? { Range: `bytes=${options.range.start}-${options.range.end}` }
+            : undefined;
+          const response = await fetch(url, { headers });
+          if (!response.ok) {
+            const error = new Error(`${url} -> HTTP ${response.status}`);
+            error.status = response.status;
+            throw error;
+          }
+          result = { buffer: await response.arrayBuffer(), status: response.status };
+        }
+        const bytes = Number(result?.buffer?.byteLength) || 0;
+        runtime.network.bytes += bytes;
+        runtime.network.lastStatus = Number(result?.status) || null;
+        if (ranged) runtime.network.lastRangeStatus = Number(result?.status) || null;
+        runtime.network.lastDurationMs = Date.now() - started;
+        runtime.network.lastError = null;
+        return result;
+      } catch (error) {
+        runtime.network.failures += 1;
+        runtime.network.lastDurationMs = Date.now() - started;
+        runtime.network.lastError = errorText(error);
+        if (Number(error?.status) === 429 && attempt < retryDelays.length) {
+          runtime.network.retries += 1;
+          const delay = settings?.retryDelayMs === 0 ? 0 : retryDelays[attempt];
+          if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+        throw error;
       }
-      const bytes = Number(result?.buffer?.byteLength) || 0;
-      runtime.network.bytes += bytes;
-      runtime.network.lastStatus = Number(result?.status) || null;
-      if (ranged) runtime.network.lastRangeStatus = Number(result?.status) || null;
-      runtime.network.lastDurationMs = Date.now() - started;
-      runtime.network.lastError = null;
-      return result;
-    } catch (error) {
-      runtime.network.failures += 1;
-      runtime.network.lastDurationMs = Date.now() - started;
-      runtime.network.lastError = errorText(error);
-      throw error;
     }
   }
 
@@ -216,25 +242,36 @@
   }
 
   async function cached(key, produce) {
-    try {
-      const stored = await withStore("readonly", (store) => store.get(key));
-      if (stored) {
-        runtime.cache.hits += 1;
-        return stored;
+    if (blobInflight.has(key)) {
+      runtime.cache.inflightHits += 1;
+      return blobInflight.get(key);
+    }
+    let pending;
+    pending = (async () => {
+      try {
+        const stored = await withStore("readonly", (store) => store.get(key));
+        if (stored) {
+          runtime.cache.hits += 1;
+          return stored;
+        }
+      } catch (error) {
+        runtime.cache.readErrors += 1;
+        /* refetching is a safe fallback */
       }
-    } catch (error) {
-      runtime.cache.readErrors += 1;
-      /* refetching is a safe fallback */
-    }
-    runtime.cache.misses += 1;
-    const fresh = await produce();
-    try {
-      await withStore("readwrite", (store) => store.put(fresh, key));
-    } catch (error) {
-      runtime.cache.writeErrors += 1;
-      /* cache failure is not a lookup failure */
-    }
-    return fresh;
+      runtime.cache.misses += 1;
+      const fresh = await produce();
+      try {
+        await withStore("readwrite", (store) => store.put(fresh, key));
+      } catch (error) {
+        runtime.cache.writeErrors += 1;
+        /* cache failure is not a lookup failure */
+      }
+      return fresh;
+    })().finally(() => {
+      if (blobInflight.get(key) === pending) blobInflight.delete(key);
+    });
+    blobInflight.set(key, pending);
+    return pending;
   }
 
   async function gunzip(buffer) {
@@ -443,23 +480,34 @@
       runtime.cache.memoryHits += 1;
       return rowCache.get(key);
     }
-    const path = pathFromPattern(
-      descriptor.info.rowPattern, descriptor.bucket, descriptor.info.bucketHexWidth);
-    const start = descriptor.dataOffset;
-    const end = start + descriptor.length - 1;
-    const response = await transport(resolveUrl(path), { range: { start, end } });
-    let packed = response.buffer;
-    // A basic static server may ignore Range and return the whole bucket.  This
-    // makes local testing and conservative hosting fallbacks correct, although
-    // production hosting must return 206 to preserve the byte budget.
-    if (response.status !== 206 && packed.byteLength !== descriptor.length) {
-      packed = packed.slice(start, start + descriptor.length);
+    if (rowInflight.has(key)) {
+      runtime.cache.inflightHits += 1;
+      return rowInflight.get(key);
     }
-    if (packed.byteLength !== descriptor.length) throw new Error("Incomplete Pack V2 row range");
-    const parsed = parseRow(await gunzip(packed), descriptor);
-    rowCache.set(key, parsed);
-    while (rowCache.size > 24) rowCache.delete(rowCache.keys().next().value);
-    return parsed;
+    let pending;
+    pending = (async () => {
+      const path = pathFromPattern(
+        descriptor.info.rowPattern, descriptor.bucket, descriptor.info.bucketHexWidth);
+      const start = descriptor.dataOffset;
+      const end = start + descriptor.length - 1;
+      const response = await transport(resolveUrl(path), { range: { start, end } });
+      let packed = response.buffer;
+      // A basic static server may ignore Range and return the whole bucket.  This
+      // makes local testing and conservative hosting fallbacks correct, although
+      // production hosting must return 206 to preserve the byte budget.
+      if (response.status !== 206 && packed.byteLength !== descriptor.length) {
+        packed = packed.slice(start, start + descriptor.length);
+      }
+      if (packed.byteLength !== descriptor.length) throw new Error("Incomplete Pack V2 row range");
+      const parsed = parseRow(await gunzip(packed), descriptor);
+      rowCache.set(key, parsed);
+      while (rowCache.size > 24) rowCache.delete(rowCache.keys().next().value);
+      return parsed;
+    })().finally(() => {
+      if (rowInflight.get(key) === pending) rowInflight.delete(key);
+    });
+    rowInflight.set(key, pending);
+    return pending;
   }
 
   function adaptiveCount(similarities) {
@@ -503,15 +551,16 @@
   async function query(panoId, count) {
     const started = Date.now();
     const networkBefore = runtime.network.requests;
-    runtime.lastQuery = {
+    const queryDiagnostic = {
       panoId: String(panoId), requestedMatches: Number(count) || null,
       status: "loading", found: null, decodedMatches: 0, cacheHit: null,
       durationMs: null, error: null,
     };
+    runtime.lastQuery = queryDiagnostic;
     try {
       const descriptor = await locate(panoId);
       if (!descriptor) {
-        Object.assign(runtime.lastQuery, {
+        Object.assign(queryDiagnostic, {
           status: "not-in-corpus", found: false, cacheHit: runtime.network.requests === networkBefore,
           durationMs: Date.now() - started,
         });
@@ -523,7 +572,7 @@
       const similarities = matches.map((match) => match.similarity);
       const steering = adaptiveCount(similarities);
       const cacheHit = runtime.network.requests === networkBefore;
-      Object.assign(runtime.lastQuery, {
+      Object.assign(queryDiagnostic, {
         status: "complete", found: true, decodedMatches: matches.length, cacheHit,
         durationMs: Date.now() - started, corpus: descriptor.info.corpus,
       });
@@ -551,7 +600,7 @@
         timings: { totalSeconds: (Date.now() - started) / 1000 },
       };
     } catch (error) {
-      Object.assign(runtime.lastQuery, {
+      Object.assign(queryDiagnostic, {
         status: "failed", found: null, cacheHit: runtime.network.requests === networkBefore,
         durationMs: Date.now() - started, error: errorText(error),
       });
@@ -650,7 +699,18 @@
         }
       }
     }
-    const tiles = await Promise.all(cells.map(([latCell, lngCell]) => geoTile(info, latCell, lngCell)));
+    const tiles = [];
+    // A guess can touch nine occupied one-degree cells. Loading all nine at
+    // once creates a burst that public hosting may rate-limit, so keep three
+    // workers: still parallel, but bounded.
+    let nextCell = 0;
+    const workers = Array.from({ length: Math.min(3, cells.length) }, async () => {
+      while (nextCell < cells.length) {
+        const [latCell, lngCell] = cells[nextCell++];
+        tiles.push(await geoTile(info, latCell, lngCell));
+      }
+    });
+    await Promise.all(workers);
     let best = null;
     for (const tile of tiles) {
       for (let offset = 0; offset < tile.bytes.length; offset += info.geo.recordBytes) {

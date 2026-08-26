@@ -119,7 +119,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.75/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.76/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -133,7 +133,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.75/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.76/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
@@ -151,6 +151,8 @@ assert.match(source, /if \(typeof image\.decode === "function"\) await image\.de
   "a direct board view is fully decoded before its four tiles become visible");
 assert.match(source, /hydrateImages\(element\)\.then\(\(\) => hydrateBoardDirectTiles\(element\)\)/,
   "the complete thumbnail board is established before sharp tile layers can reveal");
+assert.match(source, /Visual similarity temporarily unavailable \(public corpus request failed\)/,
+  "a public-pack failure is not concealed by an unrelated Modal fallback status");
 assert.doesNotMatch(source, /hydrateBoardDirectTiles[\s\S]{0,1200}StreetViewPanorama/,
   "sharper board cells do not allocate additional native Street View renderers");
 

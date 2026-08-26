@@ -25,9 +25,9 @@ assert.deepEqual(v2.defaultConfig(), {
   ...expected,
   cacheName: "lodestar-pack-v2-balanced-2m-b6f99168d869873c",
 });
-assert.equal(pkg.version, "2.2.0-beta.75");
-assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.75$/m);
-assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.75";/);
+assert.equal(pkg.version, "2.2.0-beta.76");
+assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.76$/m);
+assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.76";/);
 assert.match(expected.baseUrl, /^https:\/\/huggingface\.co\/datasets\/riot1\/lodestar-balanced-2m-neighbors-v2\/resolve\/[a-f0-9]{40}$/,
   "default source is a public immutable Hugging Face revision");
 assert.doesNotMatch(expected.baseUrl, /(?:hf_|wk-)[A-Za-z0-9_-]{20,}/,
@@ -97,6 +97,12 @@ v2.configure({ baseUrl: expected.baseUrl, manifest: verifiedManifest });
   assert.equal(fallback.corpus, "lodestar-1m");
   assert.equal(fallback.corpusSize, 999693);
   assert.equal(fallback.matches.length, 3);
+
+  await assert.rejects(
+    globalThis.LodestarPack.query("not-in-either-pack", 3),
+    /simulated 2M failure/,
+    "a failed V2 lookup is not misclassified as an ordinary corpus miss when V1 has no row",
+  );
 
   globalThis.LodestarPackV2 = {
     available: () => true,
