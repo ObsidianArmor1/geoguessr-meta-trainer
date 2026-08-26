@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.66
+// @version      2.2.0-beta.67
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.66
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.67
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js
@@ -46,7 +46,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.66";
+  const USERSCRIPT_VERSION = "2.2.0-beta.67";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -1397,6 +1397,9 @@
     .omt-board-current { border:2px solid #e8e9ec; }
     .omt-board-match.omt-board-guess { border:2px solid #e6a64c; }
     .omt-board-match.omt-board-guess span { color:#ffd993; }
+    .omt-board-match.omt-board-unavailable { display:grid; place-content:center; gap:7px; padding:18px; border-style:dashed; color:#c8cbd0; text-align:center; }
+    .omt-board-match.omt-board-unavailable span { position:static; padding:0; color:#ffd993; background:none; font-weight:700; }
+    .omt-board-match.omt-board-unavailable p { margin:0; max-width:180px; color:#aeb2b8; font-size:11px; line-height:1.35; }
     /* Board thumbnails always use the canonical 448x256 embedding view. Fill
        the tile by cropping the small aspect-ratio excess instead of rewriting
        Google's thumbnail request to the viewport shape: that endpoint can
@@ -1923,6 +1926,16 @@
       contentStatus: "pending",
     }];
     for (const [index, item] of boardEntries.entries()) {
+      if (item.kind === "guess-unavailable") {
+        slots.push({
+          slotIndex: index + 1,
+          role: "nearGuessUnavailable",
+          ref: null,
+          heading: null,
+          contentStatus: "placeholder",
+        });
+        continue;
+      }
       const receiptRank = item.kind === "guess-local"
         ? item.globalPanoRank
         : item.rank;
@@ -2501,11 +2514,16 @@
     const tabs = board.modes.map((item) => `<button data-board-mode="${esc(item.id)}" class="${item.id === mode.id ? "active" : ""}">${esc(modeLabels[item.id] || item.label)}</button>`).join("");
     const boardEntries = mode.guessMatch
       ? [mode.guessMatch, ...mode.entries]
-      : mode.entries;
+      : mode.guessUnavailable
+        ? [{ kind: "guess-unavailable", mapIndex: -3 }, ...mode.entries]
+        : mode.entries;
     const boardContent = boardContentForMode(mode, boardEntries);
     const contentDigest = boardContent.contentDigest;
     const matches = boardEntries.map((item, index) => {
       const contentAttributes = `data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="${index + 1}"`;
+      if (item.kind === "guess-unavailable") {
+        return '<div class="omt-board-match omt-board-guess omt-board-unavailable" role="note" aria-label="No nearby view is available for your guess"><span>Near your guess</span><p>No nearby view is available for this guess.</p></div>';
+      }
       if (item.kind === "guess-local") {
         const distance = item.distanceFromGuessKm < 1
           ? `${Math.round(item.distanceFromGuessKm * 1000)} m`
@@ -2549,7 +2567,9 @@
     element.className = "omt-visual-board";
     const guessReceipt = mode.guessMatch
       ? `<span><b>best of ${mode.guessMatch.candidatePool}</b> locations near your guess</span>`
-      : "";
+      : mode.guessUnavailable
+        ? "<span><b>No nearby comparison</b> available for your guess</span>"
+        : "";
     element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid" style="grid-template-columns:repeat(${state.boardGrid},1fr);grid-template-rows:repeat(${state.boardGrid},1fr)"><div class="omt-board-current" tabindex="0" data-board-pano="${esc(board.panoId)}" data-board-heading="${Number(mode.currentHeading) || 0}" data-board-inspect data-board-label="This round" data-board-detail="The panorama this round spawned on">${tileImages(board.panoId, mode.currentHeading, `data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0"`, "This round")}<strong>This round</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}${board.corpus
         ? `<span><b>${mode.support}</b> of ${mode.supportOf} in the close core</span><span><b>${mode.independentAreas}</b> separate areas</span>`
         : `<span><b>${literal ? "nearest visual views" : `${mode.support}/100`}</b> in this group</span><span><b>${mode.reciprocalSupport}</b> mutual matches</span><span><b>${mode.independentAreas}</b> separate areas</span><span><b>${Math.round(mode.coherence * 100)}%</b> visual agreement</span>`}<span class="omt-board-warning">Visual similarity is evidence, not certainty.</span></footer>`;
@@ -2730,7 +2750,10 @@
             review,
             state.guessNeighborhood,
             // a 3x3 board holds the round plus 8, a 4x4 the round plus 15
-            { tiles: state.boardGrid * state.boardGrid - 1 },
+            {
+              tiles: state.boardGrid * state.boardGrid - 1,
+              guessExpected: Boolean(state.playerGuess),
+            },
           )
         : await preloadVisualBoard(
             review.datasetKey,

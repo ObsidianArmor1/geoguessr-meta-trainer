@@ -651,9 +651,14 @@
         estimated: anchor.estimated === true,
         candidatePool: Number(anchor.candidatePool) || matches.length,
       } : null;
+      // A submitted guess always owns tile two. If there is no usable corpus
+      // panorama near it, keep that place as an explanation instead of
+      // silently promoting global match #1 into the guess slot.
+      const guessUnavailable = Boolean(options.guessExpected && !guessMatch);
+      const reservedGuessSlot = Boolean(guessMatch || guessUnavailable);
       // how many separate places the tiles point at, at a 25 km grain
       const areas = [];
-      for (const match of matches.slice(0, guessMatch ? tiles - 1 : tiles)) {
+      for (const match of matches.slice(0, reservedGuessSlot ? tiles - 1 : tiles)) {
         if (!areas.some((seat) => haversineKm(seat[0], seat[1], match.latitude, match.longitude) < 25)) {
           areas.push([match.latitude, match.longitude]);
         }
@@ -672,8 +677,9 @@
           currentView: thumbnail(review.location?.panoId || "", roundHeading),
           entries: (guessMatch
           ? matches.filter((match) => match.panoId !== guessMatch.panoId).slice(0, tiles - 1)
-          : matches.slice(0, tiles)).map(entry),
+          : matches.slice(0, reservedGuessSlot ? tiles - 1 : tiles)).map(entry),
           guessMatch,
+          guessUnavailable,
           support: review.visualNeighborhood?.coreCount || matches.length,
           supportOf: matches.length,
           reciprocalSupport: null,

@@ -93,6 +93,20 @@ async function main() {
     false,
     "the guess-side example is not repeated among global ranked matches",
   );
+  const unavailableGuessBoard = boardClient.buildVisualBoard(adapted, null, {
+    tiles: 8,
+    guessExpected: true,
+  });
+  assert.equal(
+    unavailableGuessBoard.modes[0].guessUnavailable,
+    true,
+    "a submitted guess keeps an explicit comparison-unavailable slot",
+  );
+  assert.equal(
+    unavailableGuessBoard.modes[0].entries.length,
+    2,
+    "the unavailable guess slot does not duplicate or discard the available ranked matches",
+  );
 
   const packV2NullRows = adaptResponse({
     ...rawResponse,
