@@ -145,7 +145,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.86/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.87/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -159,7 +159,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.86/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.87/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
@@ -205,8 +205,10 @@ assert.match(source, /const declaredSlots = state\.boardGrid \* state\.boardGrid
   "visual-exposure receipts declare and pad the selected grid rather than assuming nine cells");
 assert.match(source, /item\.mode === content\.mode && item\.gridSize === content\.gridSize/,
   "changing grid size records distinct visual content instead of mutating a prior grid receipt");
-assert.match(source, /state\.boardGrid !== 2[\s\S]{0,900}\[12\.5, -12\.5\]\.flatMap[\s\S]{0,100}\[-30, 0, 30\]/,
+assert.match(source, /state\.boardGrid !== 2[\s\S]{0,1100}\[-12\.5, 12\.5\]\.flatMap[\s\S]{0,100}\[-30, 0, 30\]/,
   "single-direction 2x2 cells use a six-piece heading-and-pitch-aware mosaic");
+assert.doesNotMatch(source, /\[12\.5, -12\.5\]\.flatMap/,
+  "the downward pitch band cannot be placed above the upward band");
 assert.match(source, /\{ fov: 36, pitch \}/,
   "mosaic pieces use narrow perspective views instead of fixed raw panorama columns");
 assert.match(source, /467,[\s\S]{0,30}320,[\s\S]{0,80}\{ fov: 36, pitch \}/,
