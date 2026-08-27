@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.78
+// @version      2.2.0-beta.79
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.78
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.78
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.78
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.78
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.79
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.79
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.79
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.79
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.78";
+  const USERSCRIPT_VERSION = "2.2.0-beta.79";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -179,13 +179,20 @@
   const prewarmedRoundKeys = new Set();
   const modalRoundPromises = new Map();
   const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
+  // Keep an unwrapped fetch for the trainer's own polling. The request observer
+  // below deliberately queues checks after GeoGuessr's traffic; routing our own
+  // poll through it would make every poll immediately schedule another poll.
+  const pageFetch = pageWindow.fetch?.bind(pageWindow);
   const mapLayerPreferences = readMapLayerPreferences();
   const mapColorPreferences = readMapColorPreferences();
   const state = {
     review: null,
+    reviewRoundKey: "",
     fastNeighborhood: null,
     guessNeighborhood: null,
+    guessNeighborhoodRoundKey: "",
     guessNeighborhoodPromise: null,
+    guessNeighborhoodPromiseKey: "",
     active: 0,
     detail: new Map(),
     drawerOpen: false,
@@ -202,6 +209,8 @@
     imagePromises: new Map(),
     maps: new Set(),
     overlays: [],
+    overlayRoundKey: "",
+    overlayMap: null,
     originalMapView: null,
     pinIcons: null,
     // Clustering-family review is preserved at the family-meta-trainer-v1 Git
@@ -242,6 +251,7 @@
     matchTooltipClientX: 0,
     matchTooltipClientY: 0,
     visualBoard: null,
+    visualBoardRoundKey: "",
     visualBoardKey: null,
     visualBoardPromise: null,
     visualBoardWarmPromise: null,
@@ -320,6 +330,16 @@
         trackedMaps: state.maps.size,
         eligibleMaps,
         overlays: state.overlays.length,
+        ownership: {
+          request: state.roundRequestKey || null,
+          review: state.reviewRoundKey || null,
+          reviewPanoId: state.review?.location?.panoId || null,
+          guess: state.guessNeighborhoodRoundKey || null,
+          board: state.visualBoardRoundKey || null,
+          boardPanoId: state.visualBoard?.panoId || null,
+          overlays: state.overlayRoundKey || null,
+          overlaysOnCurrentMap: Boolean(state.overlayMap && state.overlayMap === resultMap()),
+        },
         nativeStreetViewPool: {
           renderers: nativePanoCache.size,
           limit: NATIVE_PANO_POOL_LIMIT,
@@ -573,9 +593,22 @@
     return `${roundNumber}:${latitude.toFixed(6)},${longitude.toFixed(6)}`;
   }
 
+  function ownsRoundRequest(token, requestKey) {
+    return token === state.requestToken && requestKey === state.roundRequestKey;
+  }
+
+  function reviewMatchesRequest(requestKey, panoId = "") {
+    return liveChallengeAdapter.reviewMatchesRequest(
+      state.review,
+      state.reviewRoundKey,
+      requestKey,
+      panoId,
+    );
+  }
+
   function clearCompletedReviewForActiveRound(roundNumber, locationValue) {
-    if (!state.review || !state.roundRequestKey) return;
-    if (reviewRequestKey(roundNumber, locationValue) !== state.roundRequestKey) clearRound();
+    if (!state.review || !state.reviewRoundKey) return;
+    if (reviewRequestKey(roundNumber, locationValue) !== state.reviewRoundKey) clearRound();
   }
 
   function prefetchModalRound(panoId, context = {}) {
@@ -903,12 +936,14 @@
         case "omt-set-grid":
           state.boardGrid = Number(target.value) === 4 ? 4 : 3;
           state.visualBoard = null;
+          state.visualBoardRoundKey = "";
           saveMapColorPreferences();
           if (state.visualBoardOpen) openVisualBoard();
           return;
         case "omt-set-board-quad":
           state.boardAllDirections = target.checked;
           state.visualBoard = null;
+          state.visualBoardRoundKey = "";
           saveMapColorPreferences();
           if (state.visualBoardOpen) openVisualBoard();
           return;
@@ -2296,6 +2331,17 @@
 
   function renderVisualBoard() {
     if (!state.visualBoardOpen || !state.shadow || !state.visualBoard) return;
+    const boardPanoId = decodedPanoId(state.visualBoard.panoId);
+    const reviewPanoId = decodedPanoId(state.review?.location?.panoId);
+    if (!state.review || state.visualBoardRoundKey !== state.reviewRoundKey
+        || (boardPanoId && reviewPanoId && boardPanoId !== reviewPanoId)) {
+      state.visualBoard = null;
+      state.visualBoardRoundKey = "";
+      queueMicrotask(() => {
+        if (state.visualBoardOpen && state.review) openVisualBoard();
+      });
+      return;
+    }
     state.visualBoardModifierCleanup?.();
     state.visualBoardModifierCleanup = null;
     state.shadow.querySelector(".omt-visual-board,.omt-board-loading")?.remove();
@@ -2471,11 +2517,14 @@
     token = state.requestToken,
     playerGuess = state.playerGuess,
   ) {
+    const review = state.review;
+    const reviewRoundKey = state.reviewRoundKey;
     const guessKey = playerGuess
       ? `${playerGuess.lat.toFixed(6)},${playerGuess.lng.toFixed(6)}`
       : "no-guess";
-    const key = `${datasetKey}:${mapIndex}:${guessKey}`;
-    if (state.visualBoardKey === key && state.visualBoard) {
+    const key = `${reviewRoundKey}:${datasetKey}:${mapIndex}:${guessKey}`;
+    if (state.visualBoardKey === key && state.visualBoard
+        && state.visualBoardRoundKey === reviewRoundKey) {
       return Promise.resolve(state.visualBoard);
     }
     if (state.visualBoardKey === key && state.visualBoardPromise) {
@@ -2484,6 +2533,7 @@
     state.visualBoardKey = key;
     if (state.review?.universal && state.review.visualBoard) {
       state.visualBoard = state.review.visualBoard;
+      state.visualBoardRoundKey = reviewRoundKey;
       state.visualBoardMode = state.visualBoard.defaultMode || "literal";
       state.visualBoardWarmPromise = warmVisualBoard(state.visualBoard).catch((error) => {
         console.warn("Meta Trainer: could not preload universal board images", error);
@@ -2498,8 +2548,10 @@
     }
     let pending;
     pending = request(`/api/visual-board/${mapIndex}?${query}`).then((board) => {
-      if (token !== state.requestToken || state.visualBoardKey !== key) return null;
+      if (token !== state.requestToken || state.visualBoardKey !== key
+          || state.review !== review || state.reviewRoundKey !== reviewRoundKey) return null;
       state.visualBoard = board;
+      state.visualBoardRoundKey = reviewRoundKey;
       state.visualBoardMode = board.defaultMode || "consensus";
       state.visualBoardWarmPromise = warmVisualBoard(board).catch((error) => {
         console.warn("Meta Trainer: could not preload visual-board images", error);
@@ -2516,6 +2568,7 @@
     if (!state.review || !state.shadow) return;
     state.visualBoardOpen = true;
     const review = state.review;
+    const reviewRoundKey = state.reviewRoundKey;
     const token = state.requestToken;
     // The second corpus tile teaches from the player's guess, regardless of
     // whether the separate guess-cloud map overlay is visible. Previously that
@@ -2524,7 +2577,8 @@
     const needsGuessExample = Boolean(
       review.universal && state.playerGuess && !state.guessNeighborhood,
     );
-    if (!needsGuessExample && state.visualBoard?.panoId === review.location.panoId
+    if (!needsGuessExample && state.visualBoardRoundKey === reviewRoundKey
+        && state.visualBoard?.panoId === review.location.panoId
         && state.visualBoard?.corpus === Boolean(state.review.universal)
         && (state.visualBoard?.corpus
           || (state.visualBoard?.mapIndex === state.review.location.mapIndex
@@ -2542,6 +2596,7 @@
         loading.textContent = "Finding the best visual case near your guess…";
         await loadGuessNeighborhood(token);
         if (token !== state.requestToken || state.review !== review
+            || state.reviewRoundKey !== reviewRoundKey
             || !state.visualBoardOpen) return;
       }
       // The corpus path has no dataset and no map index, so /api/visual-board
@@ -2562,10 +2617,12 @@
             review.location.mapIndex,
           );
       if (!board) return;
-      if (!state.visualBoardOpen || !state.review) return;
+      if (!state.visualBoardOpen || state.review !== review
+          || state.reviewRoundKey !== reviewRoundKey || token !== state.requestToken) return;
       if (!board.corpus && (board.mapIndex !== state.review.location.mapIndex
           || board.datasetKey !== state.review.datasetKey)) return;
       state.visualBoard = board;
+      state.visualBoardRoundKey = reviewRoundKey;
       state.visualBoardMode = board.defaultMode || "consensus";
       renderVisualBoard();
     } catch (error) {
@@ -3038,14 +3095,16 @@
       // Result maps in every mode can mount after the review is ready. Live
       // Challenge is especially prone to this because its compact map is a
       // separate React subtree. Paint on the first usable idle event.
-      if (state.review && state.overlays.length === 0
+      if (state.review && (state.overlays.length === 0 || state.overlayMap !== map
+          || state.overlayRoundKey !== state.reviewRoundKey)
           && (state.showVisualNeighbors || state.showGuessNeighbors)) {
         showMetaOnMap(false);
       }
     });
     if (state.review && (state.showVisualNeighbors || state.showGuessNeighbors)) {
       queueMicrotask(() => {
-        if (state.review && state.overlays.length === 0) showMetaOnMap(false);
+        if (state.review && (state.overlays.length === 0 || state.overlayMap !== resultMap()
+            || state.overlayRoundKey !== state.reviewRoundKey)) showMetaOnMap(false);
       });
     }
     map.addListener?.("click", (event) => {
@@ -3143,6 +3202,8 @@
       try { overlay.setMap(null); } catch (_error) {}
     }
     state.overlays = [];
+    state.overlayRoundKey = "";
+    state.overlayMap = null;
   }
 
   // ---- similarity-mass contours -------------------------------------------
@@ -3968,6 +4029,8 @@
       return;
     }
     clearOverlays();
+    state.overlayMap = map;
+    state.overlayRoundKey = state.review ? state.reviewRoundKey : "fast-neighborhood";
     saveMapView(map);
     const bounds = new maps.LatLngBounds();
     const icons = pinIcons(maps);
@@ -4108,6 +4171,8 @@
       requestedRoundMatches: visualMatches.length,
       requestedGuessMatches: guessMatches.length,
       overlays: state.overlays.length,
+      roundKey: state.overlayRoundKey || null,
+      currentMap: state.overlayMap === resultMap(),
       fit: Boolean(fit),
       at: new Date().toISOString(),
     };
@@ -4173,19 +4238,22 @@
     }, 10);
   }
 
-  function clearRound() {
+  function clearReviewArtifacts(reason = "next-round") {
     clearTimeout(state.pendingTimer);
     state.pendingTimer = 0;
-    flushVisualExposure("next-round");
-    state.requestToken += 1;
+    flushVisualExposure(reason);
     state.review = null;
+    state.reviewRoundKey = "";
     state.fastNeighborhood = null;
     state.guessNeighborhood = null;
+    state.guessNeighborhoodRoundKey = "";
     state.guessNeighborhoodPromise = null;
+    state.guessNeighborhoodPromiseKey = "";
     state.active = 0;
     state.detail.clear();
     state.drawerOpen = false;
     state.visualBoard = null;
+    state.visualBoardRoundKey = "";
     state.visualBoardKey = null;
     state.visualBoardPromise = null;
     state.visualBoardWarmPromise = null;
@@ -4193,25 +4261,30 @@
     state.visualBoardOpen = false;
     state.visualBoardModifierCleanup?.();
     state.visualBoardModifierCleanup = null;
-    state.round = null;
-    state.playerGuess = null;
-    state.pendingPlayerGuess = null;
     state.roundIdentity = null;
-    state.lastRoundEventState = null;
-    state.roundRequestKey = "";
-    state.roundRequestQuality = -1;
-    state.diagnostics.round = null;
-    state.diagnostics.retrieval = null;
     state.diagnostics.guessLookup = null;
     state.diagnostics.boardImagery = null;
     state.diagnostics.rendering = null;
-    diagnosticPhase("round-in-progress", { lastError: null });
     clearOverlays();
     restoreMapView();
     releaseImages();
     state.root?.remove();
     state.root = null;
     state.shadow = null;
+  }
+
+  function clearRound() {
+    state.requestToken += 1;
+    clearReviewArtifacts("next-round");
+    state.round = null;
+    state.playerGuess = null;
+    state.pendingPlayerGuess = null;
+    state.lastRoundEventState = null;
+    state.roundRequestKey = "";
+    state.roundRequestQuality = -1;
+    state.diagnostics.round = null;
+    state.diagnostics.retrieval = null;
+    diagnosticPhase("round-in-progress", { lastError: null });
   }
 
   async function applyStoredMapMode(token) {
@@ -4324,9 +4397,10 @@
 
   async function loadGuessNeighborhood(token) {
     const review = state.review;
+    const reviewRoundKey = state.reviewRoundKey;
     const guess = state.playerGuess;
-    if (!review || !guess) return null;
-    if (state.guessNeighborhood) {
+    if (!review || !reviewRoundKey || !guess) return null;
+    if (state.guessNeighborhood && state.guessNeighborhoodRoundKey === reviewRoundKey) {
       // The board may have warmed this while the map layer was hidden. If the
       // player later enables the layer, use that cached result immediately.
       if (state.showGuessNeighbors) {
@@ -4335,7 +4409,12 @@
       }
       return state.guessNeighborhood;
     }
-    if (state.guessNeighborhoodPromise) return state.guessNeighborhoodPromise;
+    if (state.guessNeighborhoodPromise
+        && state.guessNeighborhoodPromiseKey === reviewRoundKey) {
+      return state.guessNeighborhoodPromise;
+    }
+    state.guessNeighborhood = null;
+    state.guessNeighborhoodRoundKey = "";
     const guessLookupStarted = Date.now();
     state.diagnostics.guessLookup = {
       status: "loading",
@@ -4370,7 +4449,8 @@
             `/api/guess-neighborhood/${review.location.mapIndex}?${query}`,
           );
         }
-        if (token !== state.requestToken || state.review !== review) return null;
+        if (token !== state.requestToken || state.review !== review
+            || state.reviewRoundKey !== reviewRoundKey) return null;
         if (!comparison) {
           state.diagnostics.guessLookup = {
             ...state.diagnostics.guessLookup,
@@ -4380,6 +4460,7 @@
           return null;
         }
         state.guessNeighborhood = comparison;
+        state.guessNeighborhoodRoundKey = reviewRoundKey;
         state.diagnostics.guessLookup = {
           ...state.diagnostics.guessLookup,
           status: "complete",
@@ -4391,6 +4472,7 @@
         // the next render rebuild it with the near-guess tile in slot two.
         if (review.universal && state.visualBoard?.panoId === review.location?.panoId) {
           state.visualBoard = null;
+          state.visualBoardRoundKey = "";
         }
         if (state.showGuessNeighbors) {
           render();
@@ -4398,7 +4480,8 @@
         }
         return comparison;
       } catch (error) {
-        if (token === state.requestToken && state.review === review) {
+        if (token === state.requestToken && state.review === review
+            && state.reviewRoundKey === reviewRoundKey) {
           state.diagnostics.guessLookup = {
             ...state.diagnostics.guessLookup,
             status: "failed",
@@ -4416,10 +4499,12 @@
       } finally {
         if (state.guessNeighborhoodPromise === pending) {
           state.guessNeighborhoodPromise = null;
+          state.guessNeighborhoodPromiseKey = "";
         }
       }
     })();
     state.guessNeighborhoodPromise = pending;
+    state.guessNeighborhoodPromiseKey = reviewRoundKey;
     return pending;
   }
 
@@ -4477,7 +4562,7 @@
   async function liveChallengeProfileId() {
     if (state.liveChallengeProfileId) return state.liveChallengeProfileId;
     if (state.liveChallengeProfilePromise) return state.liveChallengeProfilePromise;
-    state.liveChallengeProfilePromise = pageWindow.fetch(
+    state.liveChallengeProfilePromise = pageFetch(
       "https://www.geoguessr.com/api/v3/profiles",
       { method: "GET", credentials: "include" }
     ).then(async (response) => {
@@ -4496,9 +4581,9 @@
   }
 
   async function fetchLiveChallengeState(challengeId) {
-    const dataPromise = pageWindow.fetch(
+    const dataPromise = pageFetch(
       `https://game-server.geoguessr.com/api/live-challenge/${encodeURIComponent(challengeId)}`,
-      { method: "GET", credentials: "include" }
+      { method: "GET", credentials: "include", cache: "no-store" }
     ).then(async (response) => {
       if (!response.ok) throw new Error(`Live Challenge returned ${response.status}`);
       return response.json();
@@ -4543,6 +4628,7 @@
     let trackedChallenge = null;
     let checkQueued = false;
     let lookupInFlight = false;
+    let checkAfterLookup = false;
     let lastPrewarmedRoundKey = "";
     let queueCheck = () => {};
 
@@ -4628,7 +4714,10 @@
       checkQueued = false;
       const challengeId = liveChallengeIdForPage(trackedChallenge);
       if (!challengeId) return;
-      if (lookupInFlight) return;
+      if (lookupInFlight) {
+        checkAfterLookup = true;
+        return;
+      }
       lookupInFlight = true;
       try {
         const liveState = await fetchLiveChallengeState(challengeId);
@@ -4659,7 +4748,8 @@
         if (apiPlaying || partyAwaitingResult || (!apiResult && !mounted)) {
           state.liveChallengeResultVisible = false;
           state.liveChallengePendingKey = "";
-          if (state.review) clearRound();
+          if (state.roundRequestKey || state.review || state.root || state.visualBoard
+              || state.guessNeighborhood || state.overlays.length) clearRound();
           const activeRound = liveState.activeRound;
           if (activeRound?.location) {
             if (activeRound.location.panoId) {
@@ -4678,6 +4768,10 @@
         state.liveChallengeResultVisible = true;
         const liveRound = liveState.round;
         if (!liveRound) return;
+        const expectedRequestKey = reviewRequestKey(
+          liveRound.roundNumber,
+          liveRound.location,
+        );
         if (liveRound.roundKey !== lastPrewarmedRoundKey) {
           // If the active-round warm missed, the authoritative result fetch is
           // still fed through the same cache before the review is assembled.
@@ -4690,12 +4784,15 @@
           lastPrewarmedRoundKey = liveRound.roundKey;
         }
         if (liveRound.roundKey === state.liveChallengePendingKey) return;
-        if (liveRound.roundKey === state.liveChallengeLastRoundKey && state.review) {
+        if (liveRound.roundKey === state.liveChallengeLastRoundKey
+            && reviewMatchesRequest(expectedRequestKey, liveRound.location.panoId)) {
           // GeoGuessr can replace the entire Live result subtree without a new
           // round. Reattach the trainer and repaint its overlays rather than
           // treating the already-processed round as permanently finished.
           if (!state.root?.isConnected) render();
-          if (state.overlays.length === 0
+          const map = resultMap();
+          if ((state.overlays.length === 0 || state.overlayMap !== map
+              || state.overlayRoundKey !== state.reviewRoundKey)
               && (state.showVisualNeighbors || state.showGuessNeighbors)) {
             showMetaOnMap(false);
           }
@@ -4708,8 +4805,20 @@
           state.roundRequestQuality = -1;
         }
         state.liveChallengePendingKey = liveRound.roundKey;
-        await handleRoundEnd(liveChallengeAdapter.buildEventState(liveRound, challengeId));
-        state.liveChallengeLastRoundKey = liveRound.roundKey;
+        const outcome = await handleRoundEnd(
+          liveChallengeAdapter.buildEventState(liveRound, challengeId),
+        );
+        if (liveChallengeAdapter.outcomeCompletesRound(
+          outcome,
+          state.review,
+          state.reviewRoundKey,
+          expectedRequestKey,
+          liveRound.location.panoId,
+        )) {
+          state.liveChallengeLastRoundKey = liveRound.roundKey;
+        } else {
+          window.setTimeout(queueCheck, outcome?.status === "pending" ? 120 : 650);
+        }
       } catch (error) {
         console.error("Meta Trainer: Live Challenge round lookup failed", error);
         diagnosticError(error, "live-challenge-round-lookup");
@@ -4717,6 +4826,10 @@
       } finally {
         lookupInFlight = false;
         state.liveChallengePendingKey = "";
+        if (checkAfterLookup) {
+          checkAfterLookup = false;
+          queueCheck();
+        }
       }
     };
 
@@ -4755,11 +4868,10 @@
 
   async function handleRoundEnd(eventState) {
     clearTimeout(state.offlineRetryTimer);
-    clearTimeout(state.pendingTimer);
     const reviewStartedAt = Date.now();
     const rounds = eventState?.rounds || [];
     const round = rounds[rounds.length - 1];
-    if (!round?.location) return;
+    if (!round?.location) return { status: "unavailable" };
     const requestPanoId = decodedPanoId(round.location.panoId);
     const requestKey = reviewRequestKey(rounds.length, round.location);
     const rawRequestGuess = round.player_guess || round.playerGuess || round.guess;
@@ -4767,13 +4879,28 @@
       + (rawRequestGuess ? 2 : 0)
       + (Number.isFinite(Number(round.score?.amount ?? round.score)) ? 1 : 0)
       + (Number.isFinite(Number(round.distance?.meters?.amount ?? round.distanceMeters)) ? 1 : 0);
-    if (state.roundRequestKey === requestKey && state.roundRequestQuality >= requestQuality) return;
+    if (state.roundRequestKey === requestKey && state.roundRequestQuality >= requestQuality) {
+      return reviewMatchesRequest(requestKey, requestPanoId)
+        ? { status: "ready", requestKey }
+        : { status: "pending", requestKey };
+    }
     // Duplicate round_end signals are normal: the event framework and Live
     // adapter can both report the same completed round. Do not invalidate the
     // useful request already in flight until this event has passed the quality
     // gate. Previously an equal/lower-quality duplicate incremented the token,
     // returned here, and caused the original result to be discarded as stale.
+    const previousRequestKey = state.roundRequestKey;
     const token = ++state.requestToken;
+    if (requestKey !== previousRequestKey && requestKey !== state.reviewRoundKey) {
+      // round_start is not reliable in private-party Live Challenges. A new
+      // authoritative result therefore invalidates every old visual artifact
+      // before lookup begins, so a slow/failing request can never leave the
+      // previous round's dots, recommendation, or V board visible.
+      clearReviewArtifacts("new-round-result");
+    } else {
+      clearTimeout(state.pendingTimer);
+      state.pendingTimer = 0;
+    }
     state.roundRequestKey = requestKey;
     state.roundRequestQuality = requestQuality;
     state.lastRoundEventState = eventState;
@@ -4837,6 +4964,7 @@
     const knownMap = datasetKey
       ? await portableApi.isKnownMap(datasetKey).catch(() => false)
       : false;
+    if (!ownsRoundRequest(token, requestKey)) return { status: "stale", requestKey };
     state.diagnostics.retrieval.knownMap = knownMap;
     const useSimilarityReview = Boolean(cloudPanoId) && (cloudConfigured || packAvailable);
     const cloudRequest = useSimilarityReview
@@ -4868,21 +4996,26 @@
         return result.response;
       })
       : criticalRequest(`/api/neighborhood?${params}`);
-    state.pendingTimer = window.setTimeout(() => {
-      if (token === state.requestToken && !state.review) {
+    const pendingTimer = window.setTimeout(() => {
+      if (ownsRoundRequest(token, requestKey) && !state.review) {
         renderPending(useSimilarityReview
           ? "C-RADIO similarity warming…"
           : "Analyzing visual similarity…");
       }
     }, 250);
+    state.pendingTimer = pendingTimer;
     try {
       const review = await reviewRequest;
-      clearTimeout(state.pendingTimer);
-      state.pendingTimer = 0;
-      if (token !== state.requestToken) return;
+      clearTimeout(pendingTimer);
+      if (state.pendingTimer === pendingTimer) state.pendingTimer = 0;
+      if (!ownsRoundRequest(token, requestKey)) return { status: "stale", requestKey };
       if (!review.matched) {
         renderOffline("This round did not expose a Street View panorama");
-        return;
+        return { status: "unavailable", requestKey };
+      }
+      const responsePanoId = decodedPanoId(review.location?.panoId);
+      if (requestPanoId && responsePanoId && requestPanoId !== responsePanoId) {
+        throw new Error(`Similarity response belonged to another panorama (${responsePanoId})`);
       }
       const clientDiagnostic = cradioClient.diagnostics?.() || {};
       const decodedMatches = review.visualNeighborhood?.visualMatches?.length || 0;
@@ -4899,6 +5032,7 @@
       };
       diagnosticPhase("review-ready");
       state.review = review;
+      state.reviewRoundKey = requestKey;
       state.roundIdentity = buildRoundIdentity(eventState, round, review);
       state.fastNeighborhood = null;
       clearTimeout(state.offlineRetryTimer);
@@ -4923,10 +5057,12 @@
       }
       applyStoredMapMode(token);
       loadNeighborRecommendation(token);
+      return { status: "ready", requestKey };
     } catch (error) {
-      clearTimeout(state.pendingTimer);
-      state.pendingTimer = 0;
-      if (token === state.requestToken) {
+      clearTimeout(pendingTimer);
+      if (state.pendingTimer === pendingTimer) state.pendingTimer = 0;
+      const requestStillOwned = ownsRoundRequest(token, requestKey);
+      if (requestStillOwned) {
         if (state.roundRequestKey === requestKey) {
           state.roundRequestKey = "";
           state.roundRequestQuality = -1;
@@ -4955,6 +5091,7 @@
           }, 650);
         }
       }
+      return { status: requestStillOwned ? "failed" : "stale", requestKey };
     }
   }
 

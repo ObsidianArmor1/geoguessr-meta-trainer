@@ -34,7 +34,7 @@ assert.match(source, /GM_registerMenuCommand\("Copy trainer diagnostics"/,
   "diagnostics are discoverable even when the post-round UI cannot render");
 assert.match(source, /id="omt-copy-diagnostics"/,
   "an offline round exposes a one-click diagnostic report");
-assert.match(source, /if \(state\.review && state\.overlays\.length === 0/,
+assert.match(source, /state\.overlayMap !== map[\s\S]{0,100}state\.overlayRoundKey !== state\.reviewRoundKey/,
   "late-mounted result maps render without requiring the drawer to be open");
 const diagnosticBody = source.slice(
   source.indexOf("function trainerDiagnostics()"),
@@ -62,18 +62,18 @@ assert.match(source, /pointer-events:none;user-select:none;z-index:/,
   "recommendation icons never capture a nearby panorama's hover target");
 assert.doesNotMatch(source, /new maps\.Marker\(/,
   "recommendation pins must not use Google Marker hit regions");
-assert.match(source, /await handleRoundEnd\(liveChallengeAdapter\.buildEventState\(liveRound, challengeId\)\)/,
+assert.match(source, /await handleRoundEnd\(\s*liveChallengeAdapter\.buildEventState\(liveRound, challengeId\)/,
   "Live Challenge enters the same complete round-end pipeline as single-player");
 assert.doesNotMatch(source, /framework\.events\.addEventListener\("round_end"[\s\S]{0,800}LIVE_CHALLENGE_PATH[\s\S]{0,300}return;/,
   "Live Challenge must not be excluded from the shared full-feature round_end path");
-assert.match(source, /if \(state\.roundRequestKey === requestKey && state\.roundRequestQuality >= requestQuality\) return;/,
+assert.match(source, /if \(state\.roundRequestKey === requestKey && state\.roundRequestQuality >= requestQuality\) \{[\s\S]{0,220}status: "pending"/,
   "the API fallback and event framework share a quality-aware deduplication gate");
 const roundEndBody = source.slice(
   source.indexOf("async function handleRoundEnd(eventState)"),
   source.indexOf("function prefetchModalFromEventState(eventState)"),
 );
 assert.ok(
-  roundEndBody.indexOf("if (state.roundRequestKey === requestKey && state.roundRequestQuality >= requestQuality) return;")
+  roundEndBody.indexOf("if (state.roundRequestKey === requestKey && state.roundRequestQuality >= requestQuality) {")
     < roundEndBody.indexOf("const token = ++state.requestToken;"),
   "an ignored duplicate round-end event must not invalidate the useful request already in flight",
 );
@@ -89,7 +89,7 @@ assert.match(source, /window\.setInterval\(queueCheck, 1000\)/,
   "Live round transitions have a bounded fallback when GeoGuessr emits no usable event");
 assert.match(source, /function clearCompletedReviewForActiveRound\(roundNumber, locationValue\)/,
   "an authoritative active-round identity clears stale post-round recommendations");
-assert.match(source, /if \(state\.review\) clearRound\(\);[\s\S]{0,300}const activeRound = liveState\.activeRound/,
+assert.match(source, /if \(state\.roundRequestKey \|\| state\.review \|\| state\.root \|\| state\.visualBoard[\s\S]{0,150}clearRound\(\);[\s\S]{0,300}const activeRound = liveState\.activeRound/,
   "Live Challenge clears its entire completed review before warming the active round");
 assert.match(source, /clearCompletedReviewForActiveRound\(roundNumber, location\)/,
   "raw standard round data also provides a missed-round_start safety net");
@@ -111,6 +111,28 @@ assert.match(source, /if \(!state\.root\?\.isConnected\) render\(\)/,
   "a GeoGuessr Live subtree replacement remounts an already-built review");
 assert.match(source, /state\.roundRequestQuality = -1;/,
   "a completed Live lookup that produced no interface remains retryable");
+assert.match(source, /credentials: "include", cache: "no-store"/,
+  "Live Challenge polling bypasses browser HTTP caches");
+assert.match(source, /const pageFetch = pageWindow\.fetch\?\.bind\(pageWindow\)/,
+  "trainer polling uses a stable fetch that cannot trigger its own request observer");
+assert.match(source, /const dataPromise = pageFetch\(/,
+  "Live API polling does not recursively queue itself through the GeoGuessr fetch hook");
+assert.match(source, /if \(lookupInFlight\) \{\s*checkAfterLookup = true;/,
+  "a transition observed during a Live lookup is replayed when that lookup finishes");
+assert.match(source, /liveChallengeAdapter\.outcomeCompletesRound\([\s\S]{0,300}state\.liveChallengeLastRoundKey = liveRound\.roundKey/,
+  "a duplicate or stale lookup cannot mark a Live round complete");
+assert.match(roundEndBody, /clearReviewArtifacts\("new-round-result"\)/,
+  "an authoritative new result clears every prior-round artifact before lookup");
+assert.match(roundEndBody, /ownsRoundRequest\(token, requestKey\)/,
+  "async round-end work commits only while it still owns the current request");
+assert.match(roundEndBody, /Similarity response belonged to another panorama/,
+  "a response for the wrong panorama is rejected before rendering");
+assert.match(source, /guessNeighborhoodRoundKey === reviewRoundKey/,
+  "blue-dot data is reused only by the round that produced it");
+assert.match(source, /visualBoardRoundKey !== state\.reviewRoundKey/,
+  "the V board refuses to render content owned by another round");
+assert.match(source, /state\.overlayMap !== map[\s\S]{0,100}state\.overlayRoundKey !== state\.reviewRoundKey/,
+  "overlays attached to a replaced Live result map are repainted");
 assert.match(source, /\.omt-board-current > img,\.omt-board-match > img \{[^}]*object-fit:cover/,
   "single-direction V-board thumbnails fill their cells instead of becoming a letterboxed square");
 assert.match(source, /image\.src = boardThumbnail \? resolved : fitViewToBox/,
@@ -119,7 +141,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.78/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.79/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -133,7 +155,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.78/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.79/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");

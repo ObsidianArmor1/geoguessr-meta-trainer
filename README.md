@@ -55,6 +55,7 @@ JSON report containing:
 - Pack V2 manifest, IndexedDB, byte-range, and decode outcomes;
 - Modal status without its credential;
 - requested/decoded match counts, timing, and rendering-layer counts.
+- round-ownership keys for the review, blue cloud, V board, and map overlays.
 
 The same action appears beside any post-round error. **Retry** deliberately
 retries a failed completed round; routine rerenders still never retry paid
@@ -100,7 +101,10 @@ screens share the same completed-round pipeline: static/Modal retrieval, round
 and guess clouds, adaptive recommendation, hover and Shift previews, the visual
 comparison board, saved controls/colors, outcome receipt, and diagnostics. A
 Live Challenge-specific adapter supplies identity and result state only; it
-does not maintain a reduced review UI.
+does not maintain a reduced review UI. Live polling bypasses browser caches,
+and every derived visual artifact is accepted or repainted only when its round
+identity matches the current result. This prevents an old round from surviving
+a missed `round_start`, a delayed lookup, or a replaced result-map subtree.
 
 ## Development
 
