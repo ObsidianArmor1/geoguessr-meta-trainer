@@ -109,25 +109,39 @@ assert.equal(adapter.resultMounted({
     return [{ isConnected: true, getBoundingClientRect: () => ({ width: 750, height: 350 }) }];
   },
 }), true, "a visible Live Challenge result map enables the fallback");
+assert.deepEqual(adapter.resultMountStatus({
+  querySelectorAll() {
+    return [
+      { isConnected: false },
+      { isConnected: true, getBoundingClientRect: () => ({ width: 750, height: 350 }) },
+    ];
+  },
+}), {
+  mounted: true,
+  candidates: 2,
+  connected: 1,
+  largestWidth: 750,
+  largestHeight: 350,
+}, "result diagnostics expose whether selectors or rendered geometry failed");
 
-const hiddenResultAncestor = { parentElement: null };
-const hiddenResult = {
+const transitionResultAncestor = { parentElement: null };
+const transitionResult = {
   isConnected: true,
   hidden: false,
-  parentElement: hiddenResultAncestor,
+  parentElement: transitionResultAncestor,
   closest() { return null; },
   getBoundingClientRect: () => ({ width: 750, height: 350 }),
 };
 assert.equal(adapter.resultMounted({
   defaultView: {
     getComputedStyle(element) {
-      return element === hiddenResultAncestor
+      return element === transitionResultAncestor
         ? { display: "none", visibility: "visible", opacity: "1" }
         : { display: "block", visibility: "visible", opacity: "1" };
     },
   },
-  querySelectorAll() { return [hiddenResult]; },
-}), false, "a stale result inside a hidden ancestor cannot expose review UI");
+  querySelectorAll() { return [transitionResult]; },
+}), true, "transition-ancestor semantics cannot suppress a visibly rendered result");
 
 assert.equal(adapter.resultMounted({
   querySelectorAll() {

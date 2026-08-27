@@ -83,6 +83,8 @@ assert.doesNotMatch(source, /frameworkEnded/,
   "the single-player event framework's default state must not impersonate a Live result");
 assert.match(source, /liveChallengeAdapter\.lifecycle\(data, profileId\)/,
   "Live Challenge derives gameplay/result phase from its authenticated payload");
+assert.match(source, /liveChallengeAdapter\.resultMountStatus\(document\)/,
+  "Live diagnostics distinguish missing selectors from zero-sized result geometry");
 assert.match(source, /if \(apiPlaying \|\| partyAwaitingResult \|\| \(!apiResult && !mounted\)\)/,
   "an advancing or not-yet-revealed Live round clears the full post-round interface");
 assert.match(source, /window\.setInterval\(queueCheck, 1000\)/,
@@ -141,7 +143,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.80/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.81/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -155,7 +157,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.80/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.81/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
