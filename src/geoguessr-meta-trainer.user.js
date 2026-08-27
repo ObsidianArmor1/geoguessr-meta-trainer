@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.87
+// @version      2.2.0-beta.88
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.87
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.87
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.87
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.87
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.88
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.88
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.88
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.88
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.87";
+  const USERSCRIPT_VERSION = "2.2.0-beta.88";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -111,8 +111,8 @@
     // Dots and clouds are separate layers: either can be turned off, so the map
     // can show individual matches, the shape of the distribution, or both.
     showDots: true,
-    // 2, 3 and 4 draw square boards containing the round plus 3, 8 or 15
-    // comparison views respectively.
+    // 3 and 4 draw square boards containing the round plus 8 or 15 comparison
+    // views respectively.
     boardGrid: 3,
     // Each board tile as the road-aligned view only, or as all four directions
     // the corpus was embedded from.
@@ -447,7 +447,7 @@
 
   function normalizeBoardGrid(value) {
     const number = Number(value);
-    return number === 2 || number === 3 || number === 4 ? number : 3;
+    return number === 3 || number === 4 ? number : 3;
   }
 
   function readMapColorPreferences() {
@@ -1232,10 +1232,6 @@
     /* Heading, pitch and FOV stay canonical while hydration requests the cell's
        aspect ratio at Google's useful resolution ceiling. */
     .omt-board-current > img,.omt-board-match > img { display:block; width:100%; height:100%; object-fit:cover; object-position:center; }
-    .omt-board-mosaic { position:absolute; z-index:1; inset:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); gap:0; overflow:hidden; opacity:0; transition:opacity .14s ease-out; pointer-events:none; }
-    .omt-board-mosaic.ready { opacity:1; }
-    .omt-board-mosaic-cell { position:relative; min-width:0; min-height:0; overflow:hidden; background:#050607; }
-    .omt-board-mosaic-cell img { position:absolute; left:-10%; top:0; display:block; width:120%; height:100%; max-width:none; object-fit:fill; }
     /* Four-direction grids. minmax(0,1fr) rather than 1fr, because the implicit
        minimum of 1fr is the image's intrinsic 256px - which makes the rows
        uneven and overflows the box. These rules belong in THIS sheet: the file
@@ -1417,7 +1413,7 @@
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-dots" ${state.showDots ? "checked" : ""}>Dots</label>`
       + `<label class="omt-setting">Clouds <input type="range" id="omt-set-clouds" min="0" max="100" step="5" value="${Math.round(state.bandIntensity * 100)}"></label>`
       + `<label class="omt-setting">Matches per round <input type="number" id="omt-set-matches" min="${MATCH_COUNT_MIN}" max="${MATCH_COUNT_MAX}" step="10" value="${state.matchCount}"></label>`
-      + `<label class="omt-setting">Comparison grid <select id="omt-set-grid"><option value="2"${state.boardGrid === 2 ? " selected" : ""}>2 x 2</option><option value="3"${state.boardGrid === 3 ? " selected" : ""}>3 x 3</option><option value="4"${state.boardGrid === 4 ? " selected" : ""}>4 x 4</option></select></label>`
+      + `<label class="omt-setting">Comparison grid <select id="omt-set-grid"><option value="3"${state.boardGrid === 3 ? " selected" : ""}>3 x 3</option><option value="4"${state.boardGrid === 4 ? " selected" : ""}>4 x 4</option></select></label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-board-quad" ${state.boardAllDirections ? "checked" : ""}>Comparison shows all four directions</label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-quad" ${state.dotPreviewAllDirections ? "checked" : ""}>Dot preview shows all four directions</label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-shift-quad" ${state.dotShiftAllDirections ? "checked" : ""}>Shift enlarges a dot to all four</label>`
@@ -2267,28 +2263,7 @@
   // panorama, which is what the dot previews have always done.
   function tileImages(panoId, heading, attributes, alt) {
     if (!state.boardAllDirections || !panoId || !Number.isFinite(Number(heading))) {
-      const base = `<img data-src="${esc(corpusViewUrl(panoId, heading))}" ${attributes} alt="${esc(alt)}">`;
-      if (state.boardGrid !== 2 || !panoId || !Number.isFinite(Number(heading))) return base;
-      // Six narrower perspective thumbnails form a ~1020x560 source for a
-      // typical 2x2 cell. Each visible column represents 30 degrees of the
-      // canonical 90-degree view; a small horizontal crop removes the overlap
-      // from the 36-degree source pieces. Two pitch bands cover ~50 degrees
-      // vertically at the cell's aspect ratio. This avoids both the endpoint's
-      // single-image ceiling and the attribution chrome of four embedded live
-      // renderers while keeping true-north headings explicit.
-      // On this thumbnail endpoint negative pitch is the upper band and
-      // positive pitch is the lower band. Keep that API-specific ordering
-      // explicit so the road cannot appear above the sky again.
-      const pieces = [-12.5, 12.5].flatMap((pitch) => [-30, 0, 30].map((offset) => (
-        `<div class="omt-board-mosaic-cell"><img data-src="${esc(corpusViewUrl(
-          panoId,
-          Number(heading) + offset,
-          467,
-          320,
-          { fov: 36, pitch },
-        ))}" alt=""></div>`
-      ))).join("");
-      return `${base}<div class="omt-board-mosaic" aria-hidden="true">${pieces}</div>`;
+      return `<img data-src="${esc(corpusViewUrl(panoId, heading))}" ${attributes} alt="${esc(alt)}">`;
     }
     return `<div class="omt-board-quad">` + [0, 90, 180, 270].map((offset, slot) =>
       `<img data-src="${esc(corpusViewUrl(panoId, Number(heading) + offset))}" ${attributes} `
@@ -2358,60 +2333,6 @@
       }).catch(() => {});
     }
     mountNativeStreetView(peek.querySelector(".omt-native-pano"), panoId, heading);
-  }
-
-  function revealBoardMosaics(scope) {
-    const waitForImage = (image) => new Promise((resolve, reject) => {
-      const decode = async () => {
-        try {
-          if (typeof image.decode === "function") await image.decode();
-          resolve();
-        } catch (error) {
-          reject(error);
-        }
-      };
-      if (image.complete && image.naturalWidth > 0) {
-        void decode();
-        return;
-      }
-      image.addEventListener("load", () => void decode(), { once: true });
-      image.addEventListener("error", reject, { once: true });
-    });
-    const mosaics = [...scope.querySelectorAll(".omt-board-mosaic")];
-    if (!mosaics.length) return;
-    const receipt = {
-      status: "loading",
-      mode: "six-piece-thumbnail-mosaic",
-      views: mosaics.length,
-      requestedPieces: mosaics.length * 6,
-      readyViews: 0,
-      failedViews: 0,
-      at: new Date().toISOString(),
-    };
-    state.diagnostics.boardImagery = receipt;
-    const settle = () => {
-      if (receipt.readyViews + receipt.failedViews !== receipt.views) return;
-      receipt.status = receipt.failedViews
-        ? (receipt.readyViews ? "partial" : "failed")
-        : "complete";
-    };
-    for (const mosaic of mosaics) {
-      Promise.all([...mosaic.querySelectorAll("img")].map(waitForImage)).then(() => {
-        if (mosaic.isConnected) {
-          mosaic.classList.add("ready");
-          receipt.readyViews += 1;
-        } else {
-          receipt.failedViews += 1;
-        }
-        settle();
-      }).catch(() => {
-        // The canonical single thumbnail remains visible if any one piece is
-        // unavailable; never reveal a partial stitched view.
-        receipt.failedViews += 1;
-        settle();
-        mosaic.remove();
-      });
-    }
   }
 
   function renderVisualBoard() {
@@ -2577,9 +2498,8 @@
       hidePeek();
     };
     startVisualExposure(mode.id, boardContent);
-    // Establish the complete heading-aware thumbnail board before interaction
-    // can construct an enlarged native Street View view.
-    revealBoardMosaics(element);
+    // Start the stable heading-aware thumbnail board immediately. Native Street
+    // View is created only if the learner asks for Shift enlargement.
     void hydrateImages(element);
   }
 
@@ -3053,15 +2973,11 @@
       const contentSlot = Number(image.dataset.boardSlot);
       image.removeAttribute("data-src");
       try {
-        const mosaicPiece = Boolean(image.closest(".omt-board-mosaic"));
         const box = image.getBoundingClientRect();
         const resolved = await imageUrl(path);
-        // Mosaic source geometry is deliberate: each 467x320 request returns
-        // about 409x280, then its 36-degree view is cropped to the central 30
-        // degrees. Re-fitting it to the CSS-overflowing img would change that
-        // source aspect and reduce the two-row vertical coverage. Every normal
-        // board, tooltip and peek image still uses the box-fitting max request.
-        image.src = mosaicPiece ? resolved : fitViewToBox(resolved, box.width, box.height);
+        // Every board, tooltip and peek image uses the box-fitting maximum-size
+        // request while native Street View remains an on-demand enlargement.
+        image.src = fitViewToBox(resolved, box.width, box.height);
         if (typeof image.decode === "function") await image.decode();
         if (contentMode && Number.isInteger(contentSlot)) {
           markBoardContentStatus(
