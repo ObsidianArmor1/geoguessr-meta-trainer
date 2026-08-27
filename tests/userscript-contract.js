@@ -145,7 +145,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.84/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.85/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -159,7 +159,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.84/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.85/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
@@ -183,8 +183,8 @@ assert.doesNotMatch(tileImagesBody, /corpusTileUrl|omt-board-direct|\[\[3, 1\], 
   "normal V-board cells do not use fixed raw panorama tile columns");
 assert.match(tileImagesBody, /\[0, 90, 180, 270\]\.map\([\s\S]*corpusViewUrl\(panoId, Number\(heading\) \+ offset\)/,
   "four-direction board mode retains heading-aware thumbnails");
-assert.match(source, /void hydrateImages\(element\);/,
-  "the heading-aware thumbnail board still uses normal image hydration");
+assert.match(source, /void hydrateImages\(element\)\.then\(\(\) => mountLargeBoardPreviews\(element\)\);/,
+  "the heading-aware thumbnail board still hydrates normally before an optional 2x2 native upgrade");
 assert.doesNotMatch(source, /corpusTileUrl|omt-board-direct|hydrateBoardDirectTiles/,
   "fixed direct-tile replacement and its stale hydration path are removed");
 const boardPeekBody = source.slice(
@@ -205,6 +205,22 @@ assert.match(source, /const declaredSlots = state\.boardGrid \* state\.boardGrid
   "visual-exposure receipts declare and pad the selected grid rather than assuming nine cells");
 assert.match(source, /item\.mode === content\.mode && item\.gridSize === content\.gridSize/,
   "changing grid size records distinct visual content instead of mutating a prior grid receipt");
+assert.match(source, /state\.boardGrid === 2 && panoId[\s\S]{0,180}data-board-native-preview/,
+  "large 2x2 cells reserve a native Street View layer above their thumbnail");
+assert.match(source, /function mountLargeBoardPreviews\([\s\S]{0,400}state\.boardGrid !== 2 \|\| state\.boardAllDirections/,
+  "native base previews are limited to single-direction 2x2 boards");
+assert.match(source, /scope\.querySelector\("\.omt-board-peek"\)[\s\S]{0,180}state\.boardGrid !== 2/,
+  "late thumbnail hydration cannot pull a cached renderer out of an active Shift peek");
+assert.match(source, /hydrateImages\(element\)\.then\(\(\) => mountLargeBoardPreviews\(element\)\)/,
+  "the complete thumbnail board paints before bounded native previews begin");
+assert.match(source, /releaseNativeStreetViews\(peek\);[\s\S]{0,500}mountLargeBoardPreviews\(element, \{ immediate: true \}\)/,
+  "a renderer moved into a Shift peek returns to its 2x2 base cell afterward");
+assert.match(source, /const hadPeek = Boolean\(peek\);[\s\S]{0,600}restoreBoard && hadPeek/,
+  "ordinary pointer movement cannot repeatedly restart 2x2 native warming");
+assert.match(source, /hidePeek\(\{ restoreBoard: false \}\);[\s\S]{0,180}clearTimeout\(state\.boardWarmTimer\)/,
+  "queued base warming cannot steal a renderer back from an active Shift peek");
+assert.match(source, /releaseNativeStreetViews\(previousBoard\);\s*previousBoard\?\.remove\(\)/,
+  "grid and mode changes park native previews before replacing their board");
 assert.match(source, /Visual similarity temporarily unavailable \(public corpus request failed\)/,
   "a public-pack failure is not concealed by an unrelated Modal fallback status");
 
