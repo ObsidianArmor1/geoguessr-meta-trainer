@@ -97,6 +97,40 @@ async function main() {
   );
   assert.equal(guessBoard.modes[0].guessMatch.candidatePool, 184);
   assert.equal(guessBoard.modes[0].guessMatch.poolRadiusKm, 10);
+  const compactReview = {
+    ...adapted,
+    visualNeighborhood: {
+      ...adapted.visualNeighborhood,
+      visualMatches: [
+        ...adapted.visualNeighborhood.visualMatches,
+        {
+          ...adapted.visualNeighborhood.visualMatches[0],
+          rank: 3,
+          panoId: "match-3",
+          mapIndex: 12,
+        },
+      ],
+    },
+  };
+  const compactGuessBoard = boardClient.buildVisualBoard(compactReview, {
+    guessAnchor: {
+      panoId: "match-2",
+      heading: 173,
+      distanceFromGuessKm: 1.4,
+      roundRank: 2,
+      similarityToRound: 0.90,
+      candidatePool: 184,
+      poolRadiusKm: 10,
+    },
+  }, { tiles: 3 });
+  assert.equal(compactGuessBoard.modes[0].guessMatch.panoId, "match-2");
+  assert.equal(
+    compactGuessBoard.modes[0].entries.length,
+    2,
+    "2x2 comparison keeps the near-guess view and fills exactly its two remaining match cells",
+  );
+  assert.equal(compactGuessBoard.modes[0].entries[0].panoId, "match-1");
+  assert.equal(compactGuessBoard.modes[0].entries[1].panoId, "match-3");
   const unavailableGuessBoard = boardClient.buildVisualBoard(adapted, null, {
     tiles: 8,
     guessExpected: true,

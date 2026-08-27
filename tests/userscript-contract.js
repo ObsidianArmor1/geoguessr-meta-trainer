@@ -145,7 +145,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.83/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.84/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -159,7 +159,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.83/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.84/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
@@ -195,6 +195,16 @@ assert.match(boardPeekBody, /state\.boardAllDirections/,
   "V-board Shift enlargement follows the V-board direction setting");
 assert.doesNotMatch(boardPeekBody, /state\.dotShiftAllDirections/,
   "the dot enlargement setting cannot consume all four renderers on a one-direction V board");
+assert.match(source, /<option value="2"\$\{state\.boardGrid === 2[^}]*\}>2 x 2<\/option>/,
+  "the comparison-grid control exposes a persisted 2x2 option");
+assert.match(source, /function normalizeBoardGrid\(value\)[\s\S]{0,180}number === 2 \|\| number === 3 \|\| number === 4/,
+  "only the three supported comparison-grid sizes survive storage and input");
+assert.match(source, /availableEntries\.slice\(0, state\.boardGrid \* state\.boardGrid - 1\)/,
+  "every board, including legacy map-specific boards, is bounded to the selected grid capacity");
+assert.match(source, /const declaredSlots = state\.boardGrid \* state\.boardGrid;[\s\S]{0,1800}while \(slots\.length < declaredSlots\)/,
+  "visual-exposure receipts declare and pad the selected grid rather than assuming nine cells");
+assert.match(source, /item\.mode === content\.mode && item\.gridSize === content\.gridSize/,
+  "changing grid size records distinct visual content instead of mutating a prior grid receipt");
 assert.match(source, /Visual similarity temporarily unavailable \(public corpus request failed\)/,
   "a public-pack failure is not concealed by an unrelated Modal fallback status");
 

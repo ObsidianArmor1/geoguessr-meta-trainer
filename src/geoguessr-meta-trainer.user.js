@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.83
+// @version      2.2.0-beta.84
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.83
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.83
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.83
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.83
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.84
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.84
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.84
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.84
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.83";
+  const USERSCRIPT_VERSION = "2.2.0-beta.84";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -111,7 +111,8 @@
     // Dots and clouds are separate layers: either can be turned off, so the map
     // can show individual matches, the shape of the distribution, or both.
     showDots: true,
-    // 3 draws a 3x3 board (the round plus 8), 4 draws 4x4 (the round plus 15).
+    // 2, 3 and 4 draw square boards containing the round plus 3, 8 or 15
+    // comparison views respectively.
     boardGrid: 3,
     // Each board tile as the road-aligned view only, or as all four directions
     // the corpus was embedded from.
@@ -444,6 +445,11 @@
       : fallback;
   }
 
+  function normalizeBoardGrid(value) {
+    const number = Number(value);
+    return number === 2 || number === 3 || number === 4 ? number : 3;
+  }
+
   function readMapColorPreferences() {
     try {
       const stored = JSON.parse(localStorage.getItem(MAP_COLOR_STORAGE_KEY) || "null");
@@ -459,7 +465,7 @@
         bandIntensity: normalizeIntensity(stored?.bandIntensity, DEFAULT_MAP_COLORS.bandIntensity),
         matchCount: normalizeMatchCount(stored?.matchCount, DEFAULT_MAP_COLORS.matchCount),
         showDots: stored?.showDots !== false,
-        boardGrid: Number(stored?.boardGrid) === 4 ? 4 : 3,
+        boardGrid: normalizeBoardGrid(stored?.boardGrid),
         boardAllDirections: stored?.boardAllDirections === true,
         dotPreviewAllDirections: stored?.dotPreviewAllDirections !== false,
         dotShiftAllDirections: stored?.dotShiftAllDirections !== false,
@@ -928,7 +934,7 @@
         case "omt-match-count":
           return setMatchCount(target.value);
         case "omt-set-grid":
-          state.boardGrid = Number(target.value) === 4 ? 4 : 3;
+          state.boardGrid = normalizeBoardGrid(target.value);
           state.visualBoard = null;
           state.visualBoardRoundKey = "";
           saveMapColorPreferences();
@@ -1407,7 +1413,7 @@
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-dots" ${state.showDots ? "checked" : ""}>Dots</label>`
       + `<label class="omt-setting">Clouds <input type="range" id="omt-set-clouds" min="0" max="100" step="5" value="${Math.round(state.bandIntensity * 100)}"></label>`
       + `<label class="omt-setting">Matches per round <input type="number" id="omt-set-matches" min="${MATCH_COUNT_MIN}" max="${MATCH_COUNT_MAX}" step="10" value="${state.matchCount}"></label>`
-      + `<label class="omt-setting">Comparison grid <select id="omt-set-grid"><option value="3"${state.boardGrid === 3 ? " selected" : ""}>3 x 3</option><option value="4"${state.boardGrid === 4 ? " selected" : ""}>4 x 4</option></select></label>`
+      + `<label class="omt-setting">Comparison grid <select id="omt-set-grid"><option value="2"${state.boardGrid === 2 ? " selected" : ""}>2 x 2</option><option value="3"${state.boardGrid === 3 ? " selected" : ""}>3 x 3</option><option value="4"${state.boardGrid === 4 ? " selected" : ""}>4 x 4</option></select></label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-board-quad" ${state.boardAllDirections ? "checked" : ""}>Comparison shows all four directions</label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-quad" ${state.dotPreviewAllDirections ? "checked" : ""}>Dot preview shows all four directions</label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-shift-quad" ${state.dotShiftAllDirections ? "checked" : ""}>Shift enlarges a dot to all four</label>`
@@ -1732,6 +1738,7 @@
   }
 
   function boardContentForMode(mode, boardEntries) {
+    const declaredSlots = state.boardGrid * state.boardGrid;
     const location = state.review?.location || {};
     const slots = [{
       slotIndex: 0,
@@ -1775,7 +1782,7 @@
         contentStatus: "pending",
       });
     }
-    while (slots.length < 9) {
+    while (slots.length < declaredSlots) {
       slots.push({
         slotIndex: slots.length,
         role: "empty",
@@ -1786,9 +1793,10 @@
     }
     return {
       mode: mode.id,
+      gridSize: state.boardGrid,
       renderedAtMs: Date.now(),
-      policyVersion: "visual-board-3x3-near-guess-v1",
-      declaredSlots: 9,
+      policyVersion: "visual-board-adaptive-grid-near-guess-v2",
+      declaredSlots,
       contentDigest: shortContentDigest(slots),
       contentChangedDuringMode: false,
       slots,
@@ -1798,7 +1806,9 @@
   function registerBoardContent(content) {
     const exposure = state.visualExposure;
     if (!exposure || !content) return;
-    const existing = exposure.boardContent.find((item) => item.mode === content.mode);
+    const existing = exposure.boardContent.find((item) => (
+      item.mode === content.mode && item.gridSize === content.gridSize
+    ));
     if (!existing) {
       exposure.boardContent.push(content);
     } else if (existing.contentDigest !== content.contentDigest) {
@@ -2345,13 +2355,18 @@
       || board.modes[0];
     state.visualBoardMode = mode.id;
     const literal = mode.id === "literal";
-    const modeLabels = { consensus: "Main group", alternate: "Other group", literal: "Nearest 8" };
+    const modeLabels = { consensus: "Main group", alternate: "Other group", literal: "Nearest views" };
     const tabs = board.modes.map((item) => `<button data-board-mode="${esc(item.id)}" class="${item.id === mode.id ? "active" : ""}">${esc(modeLabels[item.id] || item.label)}</button>`).join("");
-    const boardEntries = mode.guessMatch
+    const availableEntries = mode.guessMatch
       ? [mode.guessMatch, ...mode.entries]
       : mode.guessUnavailable
         ? [{ kind: "guess-unavailable", mapIndex: -3 }, ...mode.entries]
         : mode.entries;
+    // The round owns the first cell. The near-guess comparison, when present,
+    // remains cell two; then take only as many global matches as this grid can
+    // display. This also bounds older map-specific boards that return eight
+    // entries regardless of the user's selected grid size.
+    const boardEntries = availableEntries.slice(0, state.boardGrid * state.boardGrid - 1);
     const boardContent = boardContentForMode(mode, boardEntries);
     const contentDigest = boardContent.contentDigest;
     const matches = boardEntries.map((item, index) => {
@@ -2394,7 +2409,7 @@
     const interpretation = board.corpus
       ? "Closest panoramas in the corpus, each shown along its own road direction."
       : literal
-      ? "Eight closest views, without filtering for agreement."
+      ? "Closest views, without filtering for agreement."
       : mode.id === "alternate"
         ? "Another shared look among the nearest visual candidates."
         : "Most consistent shared look among the nearest visual candidates.";
@@ -2488,10 +2503,14 @@
   async function warmVisualBoard(board) {
     const mode = board.modes.find((item) => item.id === (board.defaultMode || "consensus"))
       || board.modes[0];
+    const availableEntries = state.boardGrid * state.boardGrid - 1;
+    const reservedGuessSlot = Boolean(mode.guessMatch || mode.guessUnavailable);
     const paths = [
       mode.currentView,
       ...(mode.guessMatch ? [mode.guessMatch.view] : []),
-      ...mode.entries.map((item) => item.view),
+      ...mode.entries
+        .slice(0, Math.max(0, availableEntries - (reservedGuessSlot ? 1 : 0)))
+        .map((item) => item.view),
     ];
     await Promise.all(paths.map(async (path) => {
       const src = await imageUrl(path);
@@ -2601,7 +2620,7 @@
         ? cradioClient.buildVisualBoard(
             review,
             state.guessNeighborhood,
-            // a 3x3 board holds the round plus 8, a 4x4 the round plus 15
+            // A square board reserves its first cell for the round itself.
             {
               tiles: state.boardGrid * state.boardGrid - 1,
               guessExpected: Boolean(state.playerGuess),
