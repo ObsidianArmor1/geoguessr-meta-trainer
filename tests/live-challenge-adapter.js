@@ -138,7 +138,7 @@ assert.equal(adapter.resultMounted({
       getBoundingClientRect: () => ({ width: 750, height: 350 }),
     }];
   },
-}), false, "an aria-hidden prior result cannot impersonate the current result");
+}), true, "accessibility-only aria-hidden state cannot suppress a visibly mounted result");
 
 assertFixture("public");
 assertFixture("party");

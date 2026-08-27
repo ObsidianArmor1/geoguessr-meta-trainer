@@ -105,6 +105,8 @@ does not maintain a reduced review UI. Live polling bypasses browser caches,
 and every derived visual artifact is accepted or repainted only when its round
 identity matches the current result. This prevents an old round from surviving
 a missed `round_start`, a delayed lookup, or a replaced result-map subtree.
+Result visibility follows rendered geometry rather than accessibility-only DOM
+flags, which GeoGuessr may apply to a result that is still visibly on screen.
 
 ## Development
 
