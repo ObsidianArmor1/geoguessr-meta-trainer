@@ -137,13 +137,15 @@ assert.match(source, /state\.overlayMap !== map[\s\S]{0,100}state\.overlayRoundK
   "overlays attached to a replaced Live result map are repainted");
 assert.match(source, /\.omt-board-current > img,\.omt-board-match > img \{[^}]*object-fit:cover/,
   "single-direction V-board thumbnails fill their cells instead of becoming a letterboxed square");
-assert.match(source, /image\.src = boardThumbnail \? resolved : fitViewToBox/,
-  "V-board thumbnails retain the canonical embedding aspect on every browser");
+assert.match(source, /const aspect = boxWidth \/ boxHeight;[\s\S]{0,250}Math\.round\(640 \/ aspect\)/,
+  "Street View thumbnails preserve the display box aspect at the endpoint's useful resolution ceiling");
+assert.match(source, /image\.src = fitViewToBox\(resolved, box\.width, box\.height\)/,
+  "V-board thumbnails are not left at the soft 448x256 embedding input size");
 assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.81/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.82/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -157,7 +159,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.81/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.82/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");

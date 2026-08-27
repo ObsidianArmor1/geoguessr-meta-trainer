@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.81
+// @version      2.2.0-beta.82
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.81
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.81
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.81
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.81
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.82
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.82
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.82
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.82
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.81";
+  const USERSCRIPT_VERSION = "2.2.0-beta.82";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -806,9 +806,10 @@
     return `${meta.assets.examples}${value ? `?${value}` : ""}`;
   }
 
-  // The same geometry the corpus was embedded with: 448x256, fov 90, pitch 0,
-  // offsets from the panorama's own spawn heading. Anything else would show a
-  // different framing from the one the similarity was computed on.
+  // The same viewing direction the corpus was embedded with: fov 90, pitch 0,
+  // and offsets from the panorama's own spawn heading. The 448x256 default is
+  // the embedding input; display surfaces may request the same view at a size
+  // and aspect ratio better suited to their box.
   function corpusViewUrl(panoId, heading, width = 448, height = 256) {
     const query = new URLSearchParams({
       cb_client: "apiv3",
@@ -824,26 +825,19 @@
 
   // Refit a Street View thumbnail to the box it will be drawn in.
   //
-  // Board cells are sized by the window, so their aspect follows the
-  // viewport, while the thumbnails are a fixed 448x256 - the geometry the
-  // corpus was EMBEDDED at. `object-fit: contain` then letterboxes the
-  // difference. `thumbfov` is the HORIZONTAL field of view, so asking for a
-  // taller frame returns more sky and road from Google rather than stretching
-  // what is already there: the black bars fill with real imagery.
-  //
-  // Only the display changes. Similarity was computed on the 448x256 framing
-  // and is untouched by this.
+  // Google's endpoint honors the requested aspect ratio but caps the returned
+  // image near 280px tall. Use the full 640px request budget on the box's long
+  // edge and derive the other edge from the same aspect ratio. Independently
+  // clamping both dimensions can turn a wide V-board cell into a near-square
+  // response, while retaining 448x256 makes a large cell visibly soft.
+  // Heading, pitch and horizontal FOV remain unchanged; only display geometry
+  // changes. Similarity is still computed from the fixed corpus embedding.
   function fitViewToBox(url, boxWidth, boxHeight) {
     if (!/^https:\/\/streetviewpixels-pa\.googleapis\.com\//.test(url)) return url;
     if (!(boxWidth > 0) || !(boxHeight > 0)) return url;
-    const ratio = Math.min(2, window.devicePixelRatio || 1);
-    // Measured: this endpoint caps the returned image at ~497x280 whatever is
-    // asked for - 640x360, 1024x576 and 2048x1152 all came back 497x280. The
-    // ASPECT is honoured though, which is the part that matters here, so ask
-    // for the shape of the box and let Google decide the pixels. Requesting
-    // more than ~640 is pointless.
-    const width = Math.max(224, Math.min(640, Math.round(boxWidth * ratio)));
-    const height = Math.max(128, Math.min(640, Math.round(boxHeight * ratio)));
+    const aspect = boxWidth / boxHeight;
+    const width = aspect >= 1 ? 640 : Math.max(1, Math.round(640 * aspect));
+    const height = aspect >= 1 ? Math.max(1, Math.round(640 / aspect)) : 640;
     try {
       const next = new URL(url);
       next.searchParams.set("w", String(width));
@@ -1229,11 +1223,8 @@
     .omt-board-match.omt-board-unavailable { display:grid; place-content:center; gap:7px; padding:18px; border-style:dashed; color:#c8cbd0; text-align:center; }
     .omt-board-match.omt-board-unavailable span { position:static; padding:0; color:#ffd993; background:none; font-weight:700; }
     .omt-board-match.omt-board-unavailable p { margin:0; max-width:180px; color:#aeb2b8; font-size:11px; line-height:1.35; }
-    /* Board thumbnails always use the canonical 448x256 embedding view. Fill
-       the tile by cropping the small aspect-ratio excess instead of rewriting
-       Google's thumbnail request to the viewport shape: that endpoint can
-       return a near-square result on some browsers, which contain then
-       letterboxes into a narrow square in the middle of the cell. */
+    /* Heading, pitch and FOV stay canonical while hydration requests the cell's
+       aspect ratio at Google's useful resolution ceiling. */
     .omt-board-current > img,.omt-board-match > img { display:block; width:100%; height:100%; object-fit:cover; object-position:center; }
     /* Four-direction grids. minmax(0,1fr) rather than 1fr, because the implicit
        minimum of 1fr is the image's intrinsic 256px - which makes the rows
@@ -2954,14 +2945,9 @@
       const contentSlot = Number(image.dataset.boardSlot);
       image.removeAttribute("data-src");
       try {
-        const boardThumbnail = Boolean(image.closest(".omt-board-grid"));
         const box = image.getBoundingClientRect();
         const resolved = await imageUrl(path);
-        // Keep V-board thumbnails at the exact 448x256 framing C-RADIO saw.
-        // fitViewToBox remains valuable for full-screen/tooltip surfaces, but
-        // applying it here made thumbnail geometry depend on viewport shape
-        // and on browser-specific behavior of Google's thumbnail endpoint.
-        image.src = boardThumbnail ? resolved : fitViewToBox(resolved, box.width, box.height);
+        image.src = fitViewToBox(resolved, box.width, box.height);
         if (typeof image.decode === "function") await image.decode();
         if (contentMode && Number.isInteger(contentSlot)) {
           markBoardContentStatus(
