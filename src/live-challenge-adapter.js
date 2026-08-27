@@ -461,6 +461,18 @@
     };
   }
 
+  function reviewMatchesRequest(review, reviewRoundKey, requestKey, panoId = "") {
+    if (!review || !requestKey || reviewRoundKey !== requestKey) return false;
+    const expectedPanoId = decodePanoId(panoId);
+    const reviewPanoId = decodePanoId(review.location?.panoId);
+    return !expectedPanoId || !reviewPanoId || expectedPanoId === reviewPanoId;
+  }
+
+  function outcomeCompletesRound(outcome, review, reviewRoundKey, requestKey, panoId = "") {
+    return outcome?.status === "ready"
+      && reviewMatchesRequest(review, reviewRoundKey, requestKey, panoId);
+  }
+
   function resultMounted(rootNode) {
     const selector = RESULT_SELECTORS.join(",");
     if (typeof rootNode?.querySelectorAll !== "function") {
@@ -468,6 +480,13 @@
     }
     return Array.from(rootNode.querySelectorAll(selector)).some((element) => {
       if (!element?.isConnected) return false;
+      if (element.hidden || element.closest?.('[hidden],[aria-hidden="true"]')) return false;
+      const view = element.ownerDocument?.defaultView || rootNode.defaultView;
+      for (let node = element; node; node = node.parentElement) {
+        const style = view?.getComputedStyle?.(node);
+        if (style && (style.display === "none" || style.visibility === "hidden"
+            || Number(style.opacity) === 0)) return false;
+      }
       const rect = element.getBoundingClientRect?.();
       if (rect && rect.width > 80 && rect.height > 60) return true;
       return Boolean(element.getClientRects?.().length);
@@ -497,6 +516,8 @@
     normalizeRound,
     normalizeActiveRound,
     buildEventState,
+    reviewMatchesRequest,
+    outcomeCompletesRound,
     resultMounted,
   };
 

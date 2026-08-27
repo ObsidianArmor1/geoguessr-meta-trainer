@@ -110,6 +110,36 @@ assert.equal(adapter.resultMounted({
   },
 }), true, "a visible Live Challenge result map enables the fallback");
 
+const hiddenResultAncestor = { parentElement: null };
+const hiddenResult = {
+  isConnected: true,
+  hidden: false,
+  parentElement: hiddenResultAncestor,
+  closest() { return null; },
+  getBoundingClientRect: () => ({ width: 750, height: 350 }),
+};
+assert.equal(adapter.resultMounted({
+  defaultView: {
+    getComputedStyle(element) {
+      return element === hiddenResultAncestor
+        ? { display: "none", visibility: "visible", opacity: "1" }
+        : { display: "block", visibility: "visible", opacity: "1" };
+    },
+  },
+  querySelectorAll() { return [hiddenResult]; },
+}), false, "a stale result inside a hidden ancestor cannot expose review UI");
+
+assert.equal(adapter.resultMounted({
+  querySelectorAll() {
+    return [{
+      isConnected: true,
+      hidden: false,
+      closest(query) { return query.includes("aria-hidden") ? { hidden: true } : null; },
+      getBoundingClientRect: () => ({ width: 750, height: 350 }),
+    }];
+  },
+}), false, "an aria-hidden prior result cannot impersonate the current result");
+
 assertFixture("public");
 assertFixture("party");
 
@@ -235,6 +265,35 @@ assert.equal(adapter.normalizeRound(activePayload, "game", null).location.panoId
   "a submitted guess identifies the completed round during a transition");
 assert.equal(adapter.normalizeActiveRound(activePayload, "game").location.panoId, "active",
   "gameplay prefetch still warms the active question");
+
+const ownedReview = { location: { panoId: "current-pano" } };
+assert.equal(adapter.reviewMatchesRequest(
+  ownedReview,
+  "5:current-pano",
+  "5:current-pano",
+  "current-pano",
+), true, "a review explicitly owns its matching round and panorama");
+assert.equal(adapter.outcomeCompletesRound(
+  { status: "pending" },
+  ownedReview,
+  "5:current-pano",
+  "5:current-pano",
+  "current-pano",
+), false, "an in-flight duplicate cannot mark a Live round complete");
+assert.equal(adapter.outcomeCompletesRound(
+  { status: "ready" },
+  ownedReview,
+  "4:old-pano",
+  "5:current-pano",
+  "current-pano",
+), false, "an old review cannot mark the current Live round complete");
+assert.equal(adapter.outcomeCompletesRound(
+  { status: "ready" },
+  ownedReview,
+  "5:current-pano",
+  "5:current-pano",
+  "different-pano",
+), false, "a wrong-panorama response cannot mark the current Live round complete");
 
 // This is the exact input contract consumed by the ordinary handleRoundEnd
 // path. Live Challenge must not grow a reduced, feature-specific review path.

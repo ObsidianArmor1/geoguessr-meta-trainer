@@ -25,9 +25,9 @@ assert.deepEqual(v2.defaultConfig(), {
   ...expected,
   cacheName: "lodestar-pack-v2-balanced-2m-b6f99168d869873c",
 });
-assert.equal(pkg.version, "2.2.0-beta.78");
-assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.78$/m);
-assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.78";/);
+assert.equal(pkg.version, "2.2.0-beta.79");
+assert.match(userscript, /^\/\/ @version\s+2\.2\.0-beta\.79$/m);
+assert.match(userscript, /const USERSCRIPT_VERSION = "2\.2\.0-beta\.79";/);
 assert.match(expected.baseUrl, /^https:\/\/huggingface\.co\/datasets\/riot1\/lodestar-balanced-2m-neighbors-v2\/resolve\/[a-f0-9]{40}$/,
   "default source is a public immutable Hugging Face revision");
 assert.doesNotMatch(expected.baseUrl, /(?:hf_|wk-)[A-Za-z0-9_-]{20,}/,
