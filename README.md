@@ -88,10 +88,11 @@ pinned to revision `cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91` and manifest gener
   cell's aspect ratio and the thumbnail endpoint's useful resolution ceiling.
   The comparison grid can be 2×2, 3×3, or 4×4; the near-guess example keeps
   the second cell while the remaining cells show the strongest global matches.
-  Single-direction 2×2 cells upgrade their decoded thumbnails to four bounded,
-  non-interactive native Street View renderers, providing true perspective and
-  native tiles without exceeding the renderer limit that protects GeoGuessr's
-  map. Larger grids and four-direction subcells remain thumbnail-backed.
+  Single-direction 2×2 cells upgrade to an atomically decoded six-piece
+  heading-and-pitch-aware thumbnail mosaic. It provides substantially more
+  source detail without repeated native-renderer attribution bars or added
+  WebGL contexts. Larger grids and four-direction subcells use one maximum-size
+  thumbnail per displayed view.
   Shift + hover enlarges a cell with cached native Street View; the board's
   four-direction setting applies consistently to both its cells and enlarged
   view, independently of the map-dot preview settings.
