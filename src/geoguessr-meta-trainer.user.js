@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.85
+// @version      2.2.0-beta.86
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.85
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.85
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.85
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.85
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.86
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.86
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.86
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.86
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.85";
+  const USERSCRIPT_VERSION = "2.2.0-beta.86";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -816,13 +816,13 @@
   // and offsets from the panorama's own spawn heading. The 448x256 default is
   // the embedding input; display surfaces may request the same view at a size
   // and aspect ratio better suited to their box.
-  function corpusViewUrl(panoId, heading, width = 448, height = 256) {
+  function corpusViewUrl(panoId, heading, width = 448, height = 256, view = {}) {
     const query = new URLSearchParams({
       cb_client: "apiv3",
       w: String(width),
       h: String(height),
-      pitch: "0",
-      thumbfov: "90",
+      pitch: String(Number(view.pitch) || 0),
+      thumbfov: String(Number(view.fov) || 90),
       panoid: String(panoId),
       yaw: String(((Number(heading) || 0) % 360 + 360) % 360),
     });
@@ -1232,6 +1232,10 @@
     /* Heading, pitch and FOV stay canonical while hydration requests the cell's
        aspect ratio at Google's useful resolution ceiling. */
     .omt-board-current > img,.omt-board-match > img { display:block; width:100%; height:100%; object-fit:cover; object-position:center; }
+    .omt-board-mosaic { position:absolute; z-index:1; inset:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); gap:0; overflow:hidden; opacity:0; transition:opacity .14s ease-out; pointer-events:none; }
+    .omt-board-mosaic.ready { opacity:1; }
+    .omt-board-mosaic-cell { position:relative; min-width:0; min-height:0; overflow:hidden; background:#050607; }
+    .omt-board-mosaic-cell img { position:absolute; left:-10%; top:0; display:block; width:120%; height:100%; max-width:none; object-fit:fill; }
     /* Four-direction grids. minmax(0,1fr) rather than 1fr, because the implicit
        minimum of 1fr is the image's intrinsic 256px - which makes the rows
        uneven and overflows the box. These rules belong in THIS sheet: the file
@@ -2263,10 +2267,25 @@
   // panorama, which is what the dot previews have always done.
   function tileImages(panoId, heading, attributes, alt) {
     if (!state.boardAllDirections || !panoId || !Number.isFinite(Number(heading))) {
-      const nativePreview = state.boardGrid === 2 && panoId
-        ? '<div class="omt-native-pano" data-board-native-preview aria-hidden="true"></div>'
-        : '';
-      return `<img data-src="${esc(corpusViewUrl(panoId, heading))}" ${attributes} alt="${esc(alt)}">${nativePreview}`;
+      const base = `<img data-src="${esc(corpusViewUrl(panoId, heading))}" ${attributes} alt="${esc(alt)}">`;
+      if (state.boardGrid !== 2 || !panoId || !Number.isFinite(Number(heading))) return base;
+      // Six narrower perspective thumbnails form a ~1020x560 source for a
+      // typical 2x2 cell. Each visible column represents 30 degrees of the
+      // canonical 90-degree view; a small horizontal crop removes the overlap
+      // from the 36-degree source pieces. Two pitch bands cover ~50 degrees
+      // vertically at the cell's aspect ratio. This avoids both the endpoint's
+      // single-image ceiling and the attribution chrome of four embedded live
+      // renderers while keeping true-north headings explicit.
+      const pieces = [12.5, -12.5].flatMap((pitch) => [-30, 0, 30].map((offset) => (
+        `<div class="omt-board-mosaic-cell"><img data-src="${esc(corpusViewUrl(
+          panoId,
+          Number(heading) + offset,
+          467,
+          320,
+          { fov: 36, pitch },
+        ))}" alt=""></div>`
+      ))).join("");
+      return `${base}<div class="omt-board-mosaic" aria-hidden="true">${pieces}</div>`;
     }
     return `<div class="omt-board-quad">` + [0, 90, 180, 270].map((offset, slot) =>
       `<img data-src="${esc(corpusViewUrl(panoId, Number(heading) + offset))}" ${attributes} `
@@ -2338,42 +2357,58 @@
     mountNativeStreetView(peek.querySelector(".omt-native-pano"), panoId, heading);
   }
 
-  // A 2x2 cell is substantially larger than Google's thumbnail ceiling. Use
-  // the same four-renderer pool that Shift previews already use to place one
-  // native, non-interactive Street View behind each large cell. The decoded
-  // thumbnail remains underneath until native tiles are ready. Larger grids
-  // keep thumbnails: their cells are near the endpoint's native resolution,
-  // and allocating more than four renderers caused GeoGuessr's map to blank.
-  function mountLargeBoardPreviews(scope, { immediate = false } = {}) {
-    window.clearTimeout(state.boardWarmTimer);
-    if (!scope?.isConnected || scope.querySelector(".omt-board-peek")
-        || state.boardGrid !== 2 || state.boardAllDirections) return;
-    const tiles = [...scope.querySelectorAll("[data-board-inspect]")];
-    let index = 0;
-    const step = () => {
-      if (!scope.isConnected || scope.querySelector(".omt-board-peek")
-          || state.boardGrid !== 2 || state.boardAllDirections) return;
-      const tile = tiles[index];
-      index += 1;
-      if (!tile) return;
-      let slot = tile.querySelector(":scope > .omt-native-pano");
-      if (!slot) {
-        slot = document.createElement("div");
-        slot.className = "omt-native-pano";
-        slot.dataset.boardNativePreview = "";
-        slot.setAttribute("aria-hidden", "true");
-        tile.appendChild(slot);
+  function revealBoardMosaics(scope) {
+    const waitForImage = (image) => new Promise((resolve, reject) => {
+      const decode = async () => {
+        try {
+          if (typeof image.decode === "function") await image.decode();
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      };
+      if (image.complete && image.naturalWidth > 0) {
+        void decode();
+        return;
       }
-      mountNativeStreetView(
-        slot,
-        tile.dataset.boardPano,
-        Number(tile.dataset.boardHeading) || 0,
-      );
-      if (index < tiles.length) {
-        state.boardWarmTimer = window.setTimeout(step, immediate ? 0 : 60);
-      }
+      image.addEventListener("load", () => void decode(), { once: true });
+      image.addEventListener("error", reject, { once: true });
+    });
+    const mosaics = [...scope.querySelectorAll(".omt-board-mosaic")];
+    if (!mosaics.length) return;
+    const receipt = {
+      status: "loading",
+      mode: "six-piece-thumbnail-mosaic",
+      views: mosaics.length,
+      requestedPieces: mosaics.length * 6,
+      readyViews: 0,
+      failedViews: 0,
+      at: new Date().toISOString(),
     };
-    state.boardWarmTimer = window.setTimeout(step, immediate ? 0 : 40);
+    state.diagnostics.boardImagery = receipt;
+    const settle = () => {
+      if (receipt.readyViews + receipt.failedViews !== receipt.views) return;
+      receipt.status = receipt.failedViews
+        ? (receipt.readyViews ? "partial" : "failed")
+        : "complete";
+    };
+    for (const mosaic of mosaics) {
+      Promise.all([...mosaic.querySelectorAll("img")].map(waitForImage)).then(() => {
+        if (mosaic.isConnected) {
+          mosaic.classList.add("ready");
+          receipt.readyViews += 1;
+        } else {
+          receipt.failedViews += 1;
+        }
+        settle();
+      }).catch(() => {
+        // The canonical single thumbnail remains visible if any one piece is
+        // unavailable; never reveal a partial stitched view.
+        receipt.failedViews += 1;
+        settle();
+        mosaic.remove();
+      });
+    }
   }
 
   function renderVisualBoard() {
@@ -2495,22 +2530,14 @@
         });
       });
     }
-    const hidePeek = ({ restoreBoard = true } = {}) => {
+    const hidePeek = () => {
       const peek = element.querySelector(".omt-board-peek");
-      const hadPeek = Boolean(peek);
       // move the live widget out before the peek is removed, or it goes with it
       releaseNativeStreetViews(peek);
       peek?.remove();
-      // Moving a cached renderer into the enlarged view leaves its base cell
-      // showing the sharp thumbnail. Put it back when Shift is released so the
-      // 2x2 board remains native-sharp and the next enlargement is instant.
-      if (restoreBoard && hadPeek) mountLargeBoardPreviews(element, { immediate: true });
     };
     const showPeek = (tile) => {
-      hidePeek({ restoreBoard: false });
-      // Do not let a queued base-cell warm pull this renderer back out of the
-      // enlarged view. Releasing Shift restarts any unfinished base work.
-      window.clearTimeout(state.boardWarmTimer);
+      hidePeek();
       if (!tile?.dataset?.boardPano && !tile.querySelector("img")) return;
       const peek = buildBoardPeek(tile);
       element.appendChild(peek);
@@ -2549,7 +2576,8 @@
     startVisualExposure(mode.id, boardContent);
     // Establish the complete heading-aware thumbnail board before interaction
     // can construct an enlarged native Street View view.
-    void hydrateImages(element).then(() => mountLargeBoardPreviews(element));
+    revealBoardMosaics(element);
+    void hydrateImages(element);
   }
 
   async function warmVisualBoard(board) {
@@ -3022,9 +3050,15 @@
       const contentSlot = Number(image.dataset.boardSlot);
       image.removeAttribute("data-src");
       try {
+        const mosaicPiece = Boolean(image.closest(".omt-board-mosaic"));
         const box = image.getBoundingClientRect();
         const resolved = await imageUrl(path);
-        image.src = fitViewToBox(resolved, box.width, box.height);
+        // Mosaic source geometry is deliberate: each 467x320 request returns
+        // about 409x280, then its 36-degree view is cropped to the central 30
+        // degrees. Re-fitting it to the CSS-overflowing img would change that
+        // source aspect and reduce the two-row vertical coverage. Every normal
+        // board, tooltip and peek image still uses the box-fitting max request.
+        image.src = mosaicPiece ? resolved : fitViewToBox(resolved, box.width, box.height);
         if (typeof image.decode === "function") await image.decode();
         if (contentMode && Number.isInteger(contentSlot)) {
           markBoardContentStatus(
