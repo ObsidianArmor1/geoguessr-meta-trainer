@@ -86,6 +86,8 @@ pinned to revision `cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91` and manifest gener
   whether the two places share visual references.
 - V-board base cells use heading-aware corpus views requested at the displayed
   cell's aspect ratio and the thumbnail endpoint's useful resolution ceiling.
+  The comparison grid can be 2×2, 3×3, or 4×4; the near-guess example keeps
+  the second cell while the remaining cells show the strongest global matches.
   Shift + hover enlarges a cell with cached native Street View; the board's
   four-direction setting applies consistently to both its cells and enlarged
   view, independently of the map-dot preview settings.
