@@ -480,12 +480,11 @@
     }
     return Array.from(rootNode.querySelectorAll(selector)).some((element) => {
       if (!element?.isConnected) return false;
-      if (element.hidden || element.closest?.('[hidden],[aria-hidden="true"]')) return false;
+      if (element.hidden) return false;
       const view = element.ownerDocument?.defaultView || rootNode.defaultView;
       for (let node = element; node; node = node.parentElement) {
         const style = view?.getComputedStyle?.(node);
-        if (style && (style.display === "none" || style.visibility === "hidden"
-            || Number(style.opacity) === 0)) return false;
+        if (style && (style.display === "none" || style.visibility === "hidden")) return false;
       }
       const rect = element.getBoundingClientRect?.();
       if (rect && rect.width > 80 && rect.height > 60) return true;
