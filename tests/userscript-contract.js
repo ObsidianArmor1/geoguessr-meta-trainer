@@ -139,13 +139,13 @@ assert.match(source, /\.omt-board-current > img,\.omt-board-match > img \{[^}]*o
   "single-direction V-board thumbnails fill their cells instead of becoming a letterboxed square");
 assert.match(source, /const aspect = boxWidth \/ boxHeight;[\s\S]{0,250}Math\.round\(640 \/ aspect\)/,
   "Street View thumbnails preserve the display box aspect at the endpoint's useful resolution ceiling");
-assert.match(source, /image\.src = mosaicPiece \? resolved : fitViewToBox\(resolved, box\.width, box\.height\)/,
+assert.match(source, /image\.src = fitViewToBox\(resolved, box\.width, box\.height\)/,
   "ordinary V-board thumbnails are not left at the soft 448x256 embedding input size");
 assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.87/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.88/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -159,7 +159,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.87/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.88/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
@@ -183,8 +183,6 @@ assert.doesNotMatch(tileImagesBody, /corpusTileUrl|omt-board-direct|\[\[3, 1\], 
   "normal V-board cells do not use fixed raw panorama tile columns");
 assert.match(tileImagesBody, /\[0, 90, 180, 270\]\.map\([\s\S]*corpusViewUrl\(panoId, Number\(heading\) \+ offset\)/,
   "four-direction board mode retains heading-aware thumbnails");
-assert.match(source, /revealBoardMosaics\(element\);\s*void hydrateImages\(element\);/,
-  "the heading-aware thumbnail board hydrates normally while 2x2 mosaics wait atomically");
 assert.doesNotMatch(source, /corpusTileUrl|omt-board-direct|hydrateBoardDirectTiles/,
   "fixed direct-tile replacement and its stale hydration path are removed");
 const boardPeekBody = source.slice(
@@ -195,32 +193,18 @@ assert.match(boardPeekBody, /state\.boardAllDirections/,
   "V-board Shift enlargement follows the V-board direction setting");
 assert.doesNotMatch(boardPeekBody, /state\.dotShiftAllDirections/,
   "the dot enlargement setting cannot consume all four renderers on a one-direction V board");
-assert.match(source, /<option value="2"\$\{state\.boardGrid === 2[^}]*\}>2 x 2<\/option>/,
-  "the comparison-grid control exposes a persisted 2x2 option");
-assert.match(source, /function normalizeBoardGrid\(value\)[\s\S]{0,180}number === 2 \|\| number === 3 \|\| number === 4/,
-  "only the three supported comparison-grid sizes survive storage and input");
+assert.doesNotMatch(source, /<option value="2"|2 x 2/,
+  "the comparison-grid control does not offer a low-detail 2x2 mode");
+assert.match(source, /function normalizeBoardGrid\(value\)[\s\S]{0,180}number === 3 \|\| number === 4/,
+  "only the two supported comparison-grid sizes survive storage and input");
 assert.match(source, /availableEntries\.slice\(0, state\.boardGrid \* state\.boardGrid - 1\)/,
   "every board, including legacy map-specific boards, is bounded to the selected grid capacity");
 assert.match(source, /const declaredSlots = state\.boardGrid \* state\.boardGrid;[\s\S]{0,1800}while \(slots\.length < declaredSlots\)/,
   "visual-exposure receipts declare and pad the selected grid rather than assuming nine cells");
 assert.match(source, /item\.mode === content\.mode && item\.gridSize === content\.gridSize/,
   "changing grid size records distinct visual content instead of mutating a prior grid receipt");
-assert.match(source, /state\.boardGrid !== 2[\s\S]{0,1100}\[-12\.5, 12\.5\]\.flatMap[\s\S]{0,100}\[-30, 0, 30\]/,
-  "single-direction 2x2 cells use a six-piece heading-and-pitch-aware mosaic");
-assert.doesNotMatch(source, /\[12\.5, -12\.5\]\.flatMap/,
-  "the downward pitch band cannot be placed above the upward band");
-assert.match(source, /\{ fov: 36, pitch \}/,
-  "mosaic pieces use narrow perspective views instead of fixed raw panorama columns");
-assert.match(source, /467,[\s\S]{0,30}320,[\s\S]{0,80}\{ fov: 36, pitch \}/,
-  "each mosaic piece requests the aspect that yields about 409x280 source pixels before overlap cropping");
-assert.match(source, /image\.src = mosaicPiece \? resolved : fitViewToBox\(resolved, box\.width, box\.height\)/,
-  "deliberate mosaic source geometry is preserved while every ordinary thumbnail still fits at maximum size");
-assert.match(source, /Promise\.all\(\[\.\.\.mosaic\.querySelectorAll\("img"\)\]\.map\(waitForImage\)\)[\s\S]{0,180}mosaic\.classList\.add\("ready"\)/,
-  "all six mosaic pieces decode before the sharp layer appears");
-assert.match(source, /never reveal a partial stitched view[\s\S]{0,100}mosaic\.remove\(\)/,
-  "a failed piece leaves the complete canonical thumbnail in place");
-assert.match(source, /mode: "six-piece-thumbnail-mosaic"[\s\S]{0,180}requestedPieces: mosaics\.length \* 6/,
-  "diagnostics report the bounded mosaic request and completion surface");
+assert.doesNotMatch(source, /omt-board-mosaic|data-mosaic-src|revealBoardMosaics|six-piece-thumbnail-mosaic/,
+  "the comparison board does not issue stitched-mosaic enhancement requests");
 assert.doesNotMatch(source, /data-board-native-preview|mountLargeBoardPreviews/,
   "base board cells do not expose repeated native Google renderer chrome");
 assert.match(source, /releaseNativeStreetViews\(previousBoard\);\s*previousBoard\?\.remove\(\)/,
