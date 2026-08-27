@@ -86,8 +86,9 @@ pinned to revision `cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91` and manifest gener
   whether the two places share visual references.
 - V-board base cells use heading-aware corpus views requested at the displayed
   cell's aspect ratio and the thumbnail endpoint's useful resolution ceiling.
-  Shift + hover enlarges a cell with native Street View; four-direction mode
-  retains the four heading-aware thumbnail views.
+  Shift + hover enlarges a cell with cached native Street View; the board's
+  four-direction setting applies consistently to both its cells and enlarged
+  view, independently of the map-dot preview settings.
 - The near-guess comparison considers every corpus view within 10 km. If that
   yields fewer than 160 views, it expands to the nearest 160, up to a 100 km
   cap. It chooses the view visually closest to the round—exact top-300
