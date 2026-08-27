@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.84
+// @version      2.2.0-beta.85
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.84
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.84
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.84
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.84
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.85
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.85
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.85
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.85
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.84";
+  const USERSCRIPT_VERSION = "2.2.0-beta.85";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -1249,7 +1249,7 @@
     .omt-board-peek { position:fixed; z-index:4; inset:62px 2vw 40px; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; border:1px solid #ffffff4a; border-radius:5px; background:#060709fa; box-shadow:0 20px 80px #000f; pointer-events:none; }
     .omt-board-peek-media { position:relative; min-height:0; flex:1; overflow:hidden; background:#050607; }
     .omt-board-peek-media > img { display:block; width:100%; height:100%; object-fit:cover; }
-    .omt-native-pano { position:absolute; inset:0; z-index:1; opacity:0; transition:opacity .22s ease-out; background:#050607; }
+    .omt-native-pano { position:absolute; inset:0; z-index:1; opacity:0; transition:opacity .22s ease-out; background:#050607; pointer-events:none; }
     .omt-native-pano.omt-native-pano-ready { opacity:1; }
     .omt-board-peek-caption { flex:none; display:flex; justify-content:space-between; gap:20px; padding:7px 9px; color:#fff; background:#17181b; font-size:10px; }
     .omt-board-peek span { color:#8f9198; }
@@ -2175,6 +2175,7 @@
     const cached = nativePanoCache.get(key);
     if (cached && cached.host) {
       cached.usedAt = Date.now();
+      if (cached.host === slot) return cached.panorama;
       slot.replaceWith(cached.host);
       // the widget was last laid out at the attic's size, so tell it to re-fit
       pageWindow.google?.maps?.event?.trigger?.(cached.panorama, "resize");
@@ -2262,7 +2263,10 @@
   // panorama, which is what the dot previews have always done.
   function tileImages(panoId, heading, attributes, alt) {
     if (!state.boardAllDirections || !panoId || !Number.isFinite(Number(heading))) {
-      return `<img data-src="${esc(corpusViewUrl(panoId, heading))}" ${attributes} alt="${esc(alt)}">`;
+      const nativePreview = state.boardGrid === 2 && panoId
+        ? '<div class="omt-native-pano" data-board-native-preview aria-hidden="true"></div>'
+        : '';
+      return `<img data-src="${esc(corpusViewUrl(panoId, heading))}" ${attributes} alt="${esc(alt)}">${nativePreview}`;
     }
     return `<div class="omt-board-quad">` + [0, 90, 180, 270].map((offset, slot) =>
       `<img data-src="${esc(corpusViewUrl(panoId, Number(heading) + offset))}" ${attributes} `
@@ -2334,6 +2338,44 @@
     mountNativeStreetView(peek.querySelector(".omt-native-pano"), panoId, heading);
   }
 
+  // A 2x2 cell is substantially larger than Google's thumbnail ceiling. Use
+  // the same four-renderer pool that Shift previews already use to place one
+  // native, non-interactive Street View behind each large cell. The decoded
+  // thumbnail remains underneath until native tiles are ready. Larger grids
+  // keep thumbnails: their cells are near the endpoint's native resolution,
+  // and allocating more than four renderers caused GeoGuessr's map to blank.
+  function mountLargeBoardPreviews(scope, { immediate = false } = {}) {
+    window.clearTimeout(state.boardWarmTimer);
+    if (!scope?.isConnected || scope.querySelector(".omt-board-peek")
+        || state.boardGrid !== 2 || state.boardAllDirections) return;
+    const tiles = [...scope.querySelectorAll("[data-board-inspect]")];
+    let index = 0;
+    const step = () => {
+      if (!scope.isConnected || scope.querySelector(".omt-board-peek")
+          || state.boardGrid !== 2 || state.boardAllDirections) return;
+      const tile = tiles[index];
+      index += 1;
+      if (!tile) return;
+      let slot = tile.querySelector(":scope > .omt-native-pano");
+      if (!slot) {
+        slot = document.createElement("div");
+        slot.className = "omt-native-pano";
+        slot.dataset.boardNativePreview = "";
+        slot.setAttribute("aria-hidden", "true");
+        tile.appendChild(slot);
+      }
+      mountNativeStreetView(
+        slot,
+        tile.dataset.boardPano,
+        Number(tile.dataset.boardHeading) || 0,
+      );
+      if (index < tiles.length) {
+        state.boardWarmTimer = window.setTimeout(step, immediate ? 0 : 60);
+      }
+    };
+    state.boardWarmTimer = window.setTimeout(step, immediate ? 0 : 40);
+  }
+
   function renderVisualBoard() {
     if (!state.visualBoardOpen || !state.shadow || !state.visualBoard) return;
     const boardPanoId = decodedPanoId(state.visualBoard.panoId);
@@ -2349,7 +2391,9 @@
     }
     state.visualBoardModifierCleanup?.();
     state.visualBoardModifierCleanup = null;
-    state.shadow.querySelector(".omt-visual-board,.omt-board-loading")?.remove();
+    const previousBoard = state.shadow.querySelector(".omt-visual-board,.omt-board-loading");
+    releaseNativeStreetViews(previousBoard);
+    previousBoard?.remove();
     const board = state.visualBoard;
     const mode = board.modes.find((item) => item.id === state.visualBoardMode)
       || board.modes[0];
@@ -2451,14 +2495,22 @@
         });
       });
     }
-    const hidePeek = () => {
+    const hidePeek = ({ restoreBoard = true } = {}) => {
       const peek = element.querySelector(".omt-board-peek");
+      const hadPeek = Boolean(peek);
       // move the live widget out before the peek is removed, or it goes with it
       releaseNativeStreetViews(peek);
       peek?.remove();
+      // Moving a cached renderer into the enlarged view leaves its base cell
+      // showing the sharp thumbnail. Put it back when Shift is released so the
+      // 2x2 board remains native-sharp and the next enlargement is instant.
+      if (restoreBoard && hadPeek) mountLargeBoardPreviews(element, { immediate: true });
     };
     const showPeek = (tile) => {
-      hidePeek();
+      hidePeek({ restoreBoard: false });
+      // Do not let a queued base-cell warm pull this renderer back out of the
+      // enlarged view. Releasing Shift restarts any unfinished base work.
+      window.clearTimeout(state.boardWarmTimer);
       if (!tile?.dataset?.boardPano && !tile.querySelector("img")) return;
       const peek = buildBoardPeek(tile);
       element.appendChild(peek);
@@ -2497,7 +2549,7 @@
     startVisualExposure(mode.id, boardContent);
     // Establish the complete heading-aware thumbnail board before interaction
     // can construct an enlarged native Street View view.
-    void hydrateImages(element);
+    void hydrateImages(element).then(() => mountLargeBoardPreviews(element));
   }
 
   async function warmVisualBoard(board) {
@@ -2600,7 +2652,9 @@
       renderVisualBoard();
       return;
     }
-    state.shadow.querySelector(".omt-visual-board,.omt-board-loading")?.remove();
+    const previousBoard = state.shadow.querySelector(".omt-visual-board,.omt-board-loading");
+    releaseNativeStreetViews(previousBoard);
+    previousBoard?.remove();
     const loading = document.createElement("div");
     loading.className = "omt-board-loading";
     loading.textContent = "Finding coherent visual interpretations…";
