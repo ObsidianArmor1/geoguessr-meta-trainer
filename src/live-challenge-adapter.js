@@ -473,23 +473,39 @@
       && reviewMatchesRequest(review, reviewRoundKey, requestKey, panoId);
   }
 
-  function resultMounted(rootNode) {
+  function resultMountStatus(rootNode) {
     const selector = RESULT_SELECTORS.join(",");
     if (typeof rootNode?.querySelectorAll !== "function") {
-      return Boolean(rootNode?.querySelector?.(selector));
+      const mounted = Boolean(rootNode?.querySelector?.(selector));
+      return {
+        mounted,
+        candidates: mounted ? 1 : 0,
+        connected: mounted ? 1 : 0,
+        largestWidth: null,
+        largestHeight: null,
+      };
     }
-    return Array.from(rootNode.querySelectorAll(selector)).some((element) => {
-      if (!element?.isConnected) return false;
-      if (element.hidden) return false;
-      const view = element.ownerDocument?.defaultView || rootNode.defaultView;
-      for (let node = element; node; node = node.parentElement) {
-        const style = view?.getComputedStyle?.(node);
-        if (style && (style.display === "none" || style.visibility === "hidden")) return false;
-      }
+    const elements = Array.from(rootNode.querySelectorAll(selector));
+    let connected = 0;
+    let mounted = false;
+    let largestWidth = 0;
+    let largestHeight = 0;
+    for (const element of elements) {
+      if (!element?.isConnected) continue;
+      connected += 1;
       const rect = element.getBoundingClientRect?.();
-      if (rect && rect.width > 80 && rect.height > 60) return true;
-      return Boolean(element.getClientRects?.().length);
-    });
+      if (rect) {
+        largestWidth = Math.max(largestWidth, Number(rect.width) || 0);
+        largestHeight = Math.max(largestHeight, Number(rect.height) || 0);
+      }
+      if ((rect && rect.width > 80 && rect.height > 60)
+          || element.getClientRects?.().length) mounted = true;
+    }
+    return { mounted, candidates: elements.length, connected, largestWidth, largestHeight };
+  }
+
+  function resultMounted(rootNode) {
+    return resultMountStatus(rootNode).mounted;
   }
 
   const api = {
@@ -517,6 +533,7 @@
     buildEventState,
     reviewMatchesRequest,
     outcomeCompletesRound,
+    resultMountStatus,
     resultMounted,
   };
 

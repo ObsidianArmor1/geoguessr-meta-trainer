@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.80
+// @version      2.2.0-beta.81
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.80
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.80
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.80
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.80
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.81
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.81
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.81
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.81
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.80";
+  const USERSCRIPT_VERSION = "2.2.0-beta.81";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -4721,7 +4721,8 @@
       lookupInFlight = true;
       try {
         const liveState = await fetchLiveChallengeState(challengeId);
-        const mounted = liveChallengeResultMounted();
+        const resultMount = liveChallengeAdapter.resultMountStatus(document);
+        const mounted = resultMount.mounted;
         const apiResult = liveState.lifecycle.phase === "result";
         const apiPlaying = liveState.lifecycle.guessedRound > 0
           && liveState.lifecycle.guessedRound < liveState.lifecycle.announcedRound;
@@ -4738,6 +4739,12 @@
           guessedRound: liveState.lifecycle.guessedRound,
           phase: apiResult ? "result" : apiPlaying ? "playing" : "unknown",
           visibleResult: mounted,
+          resultCandidates: resultMount.candidates,
+          connectedResultCandidates: resultMount.connected,
+          largestResultCandidate: {
+            width: resultMount.largestWidth,
+            height: resultMount.largestHeight,
+          },
           hasProfileId: Boolean(liveState.profileId),
           hasPendingGuess: Boolean(state.pendingPlayerGuess),
           matchedPendingGuess: Boolean(liveState.pendingMatch),
