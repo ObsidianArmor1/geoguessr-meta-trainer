@@ -90,9 +90,9 @@ pinned to revision `cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91` and manifest gener
   the second cell while the remaining cells show the strongest global matches.
   Every displayed view uses one maximum-size thumbnail, avoiding request-heavy
   stitched mosaics and passive native-renderer resource pressure.
-  Shift + hover enlarges a cell with cached native Street View; the board's
-  four-direction setting applies consistently to both its cells and enlarged
-  view, independently of the map-dot preview settings.
+  Shift + hover enlarges a cell with cached native Street View. The compact
+  board can stay road-facing while the shared Shift-enlargement setting reveals
+  all four directions in the enlarged preview.
 - The near-guess comparison considers every corpus view within 10 km. If that
   yields fewer than 160 views, it expands to the nearest 160, up to a 100 km
   cap. It chooses the view visually closest to the round—exact top-300
