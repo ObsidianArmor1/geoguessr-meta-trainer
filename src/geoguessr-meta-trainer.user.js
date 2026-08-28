@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.89
+// @version      2.2.0-beta.90
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.89
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.89
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.89
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.89
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.90
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.90
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.90
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.90
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.89";
+  const USERSCRIPT_VERSION = "2.2.0-beta.90";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -119,8 +119,9 @@
     boardAllDirections: false,
     // The same choice for the preview that appears when hovering a dot...
     dotPreviewAllDirections: true,
-    // ...and independently for what shift enlarges it to, so a compact hover
-    // can open into the whole panorama.
+    // ...and independently for what Shift enlargement reveals, on either a
+    // map dot or a comparison-board cell. A compact road-facing view can open
+    // into the whole panorama without making every board cell four-up.
     dotShiftAllDirections: true,
   };
   const MATCH_COUNT_MIN = 20;
@@ -1416,7 +1417,7 @@
       + `<label class="omt-setting">Comparison grid <select id="omt-set-grid"><option value="3"${state.boardGrid === 3 ? " selected" : ""}>3 x 3</option><option value="4"${state.boardGrid === 4 ? " selected" : ""}>4 x 4</option></select></label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-board-quad" ${state.boardAllDirections ? "checked" : ""}>Comparison shows all four directions</label>`
       + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-quad" ${state.dotPreviewAllDirections ? "checked" : ""}>Dot preview shows all four directions</label>`
-      + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-shift-quad" ${state.dotShiftAllDirections ? "checked" : ""}>Shift enlarges a dot to all four</label>`
+      + `<label class="omt-setting"><input type="checkbox" id="omt-set-dot-shift-quad" ${state.dotShiftAllDirections ? "checked" : ""}>Shift enlargement shows all four directions</label>`
       + `<button class="omt-setting-action" id="omt-copy-diagnostics">Copy diagnostics</button>`
       + `</div>`;
   }
@@ -2279,11 +2280,10 @@
     const peek = document.createElement("div");
     peek.className = "omt-board-peek";
     const label = esc(tile.dataset.boardLabel || "Comparison view");
-    // The board and map-dot controls are intentionally independent. Using the
-    // dot setting here made the default one-direction board allocate all four
-    // Street View renderers for every Shift peek, evicting the previously
-    // cached board panorama and bringing its half-second reload back.
-    const media = state.boardAllDirections
+    // `boardAllDirections` controls the compact grid only. Shift enlargement
+    // follows the shared enlargement preference, just like a map-dot preview,
+    // so a one-direction grid can still reveal the complete panorama on demand.
+    const media = state.dotShiftAllDirections
       ? `<div class="omt-peek-quad"></div>`
       : `<img alt="${label}"><div class="omt-native-pano" aria-label="High-resolution Street View"></div>`;
     peek.innerHTML = `<div class="omt-board-peek-media">${media}</div>`
