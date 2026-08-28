@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.90
+// @version      2.2.0-beta.91
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.90
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.90
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.90
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.90
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.91
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.91
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.91
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.91
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.90";
+  const USERSCRIPT_VERSION = "2.2.0-beta.91";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -1240,7 +1240,8 @@
        applied. */
     .omt-board-quad { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:1px; width:100%; height:100%; }
     .omt-board-quad img { display:block; width:100%; height:100%; min-width:0; min-height:0; object-fit:cover; }
-    .omt-peek-quad { position:absolute; inset:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:2px; }
+    .omt-peek-quad { position:absolute; inset:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) minmax(0,1fr); gap:2px; opacity:0; transition:opacity .12s ease-out; }
+    .omt-peek-quad.omt-peek-quad-ready { opacity:1; }
     .omt-peek-cell { position:relative; min-width:0; min-height:0; overflow:hidden; background:#050607; }
     .omt-peek-quad img { display:block; width:100%; height:100%; min-width:0; min-height:0; object-fit:cover; }
     .omt-board-current strong,.omt-board-match span { position:absolute; z-index:2; left:0; top:0; padding:4px 6px; color:#fff; background:#090a0cdd; font-size:10px; }
@@ -2283,8 +2284,8 @@
     // `boardAllDirections` controls the compact grid only. Shift enlargement
     // follows the shared enlargement preference, just like a map-dot preview,
     // so a one-direction grid can still reveal the complete panorama on demand.
-    const media = state.dotShiftAllDirections
-      ? `<div class="omt-peek-quad"></div>`
+    const media = state.dotShiftAllDirections && tile.dataset.boardPano
+      ? `<img class="omt-board-peek-placeholder" alt="${label}"><div class="omt-peek-quad"></div>`
       : `<img alt="${label}"><div class="omt-native-pano" aria-label="High-resolution Street View"></div>`;
     peek.innerHTML = `<div class="omt-board-peek-media">${media}</div>`
       + `<div class="omt-board-peek-caption"><b>${label}</b>`
@@ -2295,42 +2296,70 @@
   function fillBoardPeek(peek, tile) {
     const panoId = tile.dataset.boardPano;
     const heading = Number(tile.dataset.boardHeading) || 0;
+    const image = peek.querySelector(".omt-board-peek-media > img");
+    const source = tile.querySelector("img");
+    const imageBox = image?.getBoundingClientRect();
+    // Preserve the image the learner was already looking at while an enlarged
+    // four-direction set loads. This avoids replacing useful content with four
+    // black boxes just because the larger requests have not completed yet.
+    if (image && (source?.currentSrc || source?.src)) {
+      image.src = source.currentSrc || source.src;
+    } else if (image && panoId) {
+      image.src = fitViewToBox(
+        corpusViewUrl(panoId, heading),
+        imageBox.width,
+        imageBox.height,
+      );
+    } else if (image && source?.dataset.src) {
+      imageUrl(source.dataset.src).then((url) => {
+        if (peek.isConnected) image.src = url;
+      }).catch(() => {});
+    }
     const quad = peek.querySelector(".omt-peek-quad");
     if (quad) {
-      // Four live Street View widgets, one per direction, rather than four
-      // thumbnails. The thumbnail endpoint caps around 562x280 whatever is
-      // requested, which is soft across half a screen; the widget renders the
-      // real tiles. Each cell keeps a thumbnail underneath as the thing to look
-      // at while its panorama loads, and the panorama fades in over it - the
-      // same crossfade the single-direction peek uses.
+      // Four live renderers caused exactly the behavior this interaction should
+      // avoid: four independent thumbnail-to-tile transitions, four chances to
+      // reveal a black canvas before its first paint, and four competing tile
+      // streams. Fetch the endpoint's maximum useful thumbnail for each cell
+      // instead, and reveal the complete set only when every direction loaded.
       const box = quad.getBoundingClientRect();
+      const ready = [];
       for (let slot = 0; slot < 4; slot += 1) {
         const bearing = heading + slot * 90;
         const cell = document.createElement("div");
         cell.className = "omt-peek-cell";
         const still = document.createElement("img");
         still.alt = `${tile.dataset.boardLabel || "Comparison view"}, direction ${slot + 1}`;
-        still.src = fitViewToBox(corpusViewUrl(panoId, bearing), box.width / 2, box.height / 2);
-        const live = document.createElement("div");
-        live.className = "omt-native-pano";
-        live.setAttribute("aria-label", `High-resolution Street View, direction ${slot + 1}`);
-        cell.append(still, live);
+        ready.push(new Promise((resolve, reject) => {
+          still.addEventListener("load", () => {
+            // A completed network request is not necessarily a decoded frame.
+            // Wait for decode as well so the atomic reveal cannot flash empty
+            // cells on its first painted frame.
+            Promise.resolve(still.decode?.()).then(resolve, resolve);
+          }, { once: true });
+          still.addEventListener("error", reject, { once: true });
+        }));
+        still.src = fitViewToBox(
+          corpusViewUrl(panoId, bearing),
+          box.width / 2,
+          box.height / 2,
+        );
+        cell.append(still);
         quad.appendChild(cell);
-        mountNativeStreetView(live, panoId, bearing);
       }
+      Promise.all(ready).then(() => {
+        if (!quad.isConnected) return;
+        window.requestAnimationFrame(() => {
+          if (quad.isConnected) quad.classList.add("omt-peek-quad-ready");
+        });
+      }).catch(() => {
+        // Keep the already-visible road-facing frame rather than expose a
+        // partial four-up view when any direction is unavailable.
+      });
       return;
     }
-    const image = peek.querySelector("img");
-    const source = tile.querySelector("img");
-    const box = image.getBoundingClientRect();
-    if (panoId) {
-      image.src = fitViewToBox(corpusViewUrl(panoId, heading), box.width, box.height);
-    } else if (source?.currentSrc || source?.src) {
-      image.src = source.currentSrc || source.src;
-    } else if (source?.dataset.src) {
-      imageUrl(source.dataset.src).then((url) => {
-        if (peek.isConnected) image.src = url;
-      }).catch(() => {});
+    if (image && panoId) {
+      image.src = fitViewToBox(corpusViewUrl(panoId, heading), imageBox.width, imageBox.height);
     }
     mountNativeStreetView(peek.querySelector(".omt-native-pano"), panoId, heading);
   }
