@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.88
+// @version      2.2.0-beta.89
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.88
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.88
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.88
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.88
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.89
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.89
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.89
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.89
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.88";
+  const USERSCRIPT_VERSION = "2.2.0-beta.89";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -2824,6 +2824,20 @@
     }
   }
 
+  function applyMatchTooltipExpansion(tooltip = state.matchTooltip) {
+    if (!tooltip?.isConnected) return;
+    tooltip.classList.toggle("omt-match-tooltip-expanded", state.matchTooltipShift);
+    if (state.matchTooltipShift && state.matchTooltipPoint) {
+      ensureMatchTooltipHighResolution(tooltip, state.matchTooltipPoint);
+      return;
+    }
+    positionMatchTooltip(
+      tooltip,
+      state.matchTooltipClientX,
+      state.matchTooltipClientY,
+    );
+  }
+
   function queueMatchTooltip(point, clientX, clientY, shiftKey = false) {
     // PointerEvent.shiftKey is not reliable on every Google Maps overlay.
     // Once keyboard keydown says Shift is held, preserve that state until the
@@ -2836,6 +2850,11 @@
         : `${point.comparisonSide || "round"}:${point.mapIndex}:${point.rank}`;
     if (state.hoveredMatchKey === key && state.matchTooltip?.isConnected) {
       positionMatchTooltip(state.matchTooltip, clientX, clientY);
+      // Google Maps overlay pointer events can retain modifier state even when
+      // the page misses the document keydown. The old early return updated the
+      // boolean but never expanded the existing preview or requested its four
+      // directions, making Shift appear randomly broken until the next hover.
+      applyMatchTooltipExpansion(state.matchTooltip);
       return;
     }
     hideMatchTooltip();
@@ -2933,19 +2952,7 @@
     state.shiftHeld = held;
     state.matchTooltipShift = held;
     state.visualBoardShiftUpdate?.(held);
-    const tooltip = state.matchTooltip;
-    if (!tooltip?.isConnected) return;
-    tooltip.classList.toggle("omt-match-tooltip-expanded", state.matchTooltipShift);
-    if (held && state.matchTooltipPoint) {
-      ensureMatchTooltipHighResolution(tooltip, state.matchTooltipPoint);
-    }
-    if (!state.matchTooltipShift) {
-      positionMatchTooltip(
-        tooltip,
-        state.matchTooltipClientX,
-        state.matchTooltipClientY,
-      );
-    }
+    applyMatchTooltipExpansion();
   }
 
   function releaseShiftModifier() {
@@ -2953,15 +2960,7 @@
     state.shiftHeld = false;
     state.matchTooltipShift = false;
     state.visualBoardShiftUpdate?.(false);
-    const tooltip = state.matchTooltip;
-    if (tooltip?.isConnected) {
-      tooltip.classList.remove("omt-match-tooltip-expanded");
-      positionMatchTooltip(
-        tooltip,
-        state.matchTooltipClientX,
-        state.matchTooltipClientY,
-      );
-    }
+    applyMatchTooltipExpansion();
   }
 
   async function hydrateImages(scope = state.shadow) {

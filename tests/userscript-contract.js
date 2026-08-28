@@ -145,7 +145,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.88/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.89/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -159,7 +159,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.88/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.89/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
@@ -193,6 +193,10 @@ assert.match(boardPeekBody, /state\.boardAllDirections/,
   "V-board Shift enlargement follows the V-board direction setting");
 assert.doesNotMatch(boardPeekBody, /state\.dotShiftAllDirections/,
   "the dot enlargement setting cannot consume all four renderers on a one-direction V board");
+assert.match(source, /state\.hoveredMatchKey === key && state\.matchTooltip\?\.isConnected[\s\S]{0,600}applyMatchTooltipExpansion\(state\.matchTooltip\)/,
+  "a map pointer event can apply Shift enlargement to an already-open dot preview");
+assert.match(source, /function applyMatchTooltipExpansion\([\s\S]{0,420}ensureMatchTooltipHighResolution\(tooltip, state\.matchTooltipPoint\)/,
+  "all modifier paths share the four-direction high-resolution expansion path");
 assert.doesNotMatch(source, /<option value="2"|2 x 2/,
   "the comparison-grid control does not offer a low-detail 2x2 mode");
 assert.match(source, /function normalizeBoardGrid\(value\)[\s\S]{0,180}number === 3 \|\| number === 4/,
