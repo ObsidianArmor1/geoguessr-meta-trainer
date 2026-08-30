@@ -91,9 +91,8 @@ pinned to revision `cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91` and manifest gener
   Every displayed view uses one maximum-size thumbnail, avoiding request-heavy
   stitched mosaics and passive native-renderer resource pressure.
   Shift + hover enlarges a cell. The compact board can stay road-facing while
-  the shared Shift-enlargement setting loads four maximum-size thumbnails in
-  parallel and reveals the completed set together. Four-direction enlargement
-  does not start native Street View renderers or expose staggered black canvases.
+  the shared Shift-enlargement setting shows four maximum-size thumbnails and
+  upgrades each direction to cached native Street View tiles.
 - The near-guess comparison considers every corpus view within 10 km. If that
   yields fewer than 160 views, it expands to the nearest 160, up to a 100 km
   cap. It chooses the view visually closest to the round—exact top-300

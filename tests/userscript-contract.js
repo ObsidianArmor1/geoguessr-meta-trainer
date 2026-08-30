@@ -145,7 +145,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.91/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.92/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -159,7 +159,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.91/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.92/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
@@ -203,14 +203,8 @@ const boardPeekQuadBody = boardPeekFillBody.slice(
   boardPeekFillBody.indexOf("if (quad)"),
   boardPeekFillBody.indexOf("if (image && panoId)", boardPeekFillBody.indexOf("if (quad)")),
 );
-assert.match(boardPeekBody, /omt-board-peek-placeholder/,
-  "four-direction Shift keeps the current board image visible while loading");
-assert.match(boardPeekQuadBody, /Promise\.all\(ready\)[\s\S]*omt-peek-quad-ready/,
-  "four maximum-size thumbnails reveal atomically rather than one direction at a time");
-assert.match(boardPeekQuadBody, /still\.decode\?\.\(\)/,
-  "atomic four-direction reveal waits for decoded images, not only network completion");
-assert.doesNotMatch(boardPeekQuadBody, /mountNativeStreetView|omt-native-pano/,
-  "four-direction V enlargement does not create competing native renderers");
+assert.match(boardPeekQuadBody, /cell\.append\(still, live\)[\s\S]*mountNativeStreetView\(live, panoId, bearing\)/,
+  "four-direction V enlargement keeps thumbnails beneath four native renderers");
 assert.match(boardPeekFillBody, /mountNativeStreetView\(peek\.querySelector\("\.omt-native-pano"\)/,
   "optional one-direction enlargement retains its cached native renderer");
 assert.match(source, /state\.hoveredMatchKey === key && state\.matchTooltip\?\.isConnected[\s\S]{0,600}applyMatchTooltipExpansion\(state\.matchTooltip\)/,
