@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.92
+// @version      2.2.0-beta.93
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.92
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.92
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.92
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.92
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.93
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.93
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.93
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.93
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.92";
+  const USERSCRIPT_VERSION = "2.2.0-beta.93";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -1224,12 +1224,13 @@
     .omt-board-body { min-height:0; flex:1; padding:5px; }
     .omt-board-grid { width:100%; height:100%; min-width:0; min-height:0; display:grid; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(3,1fr); gap:4px; }
     .omt-board-current,.omt-board-match { position:relative; min-width:0; min-height:0; overflow:hidden; border:1px solid #ffffff1c; border-radius:3px; background:#050607; }
-    .omt-board-current { border:2px solid #e8e9ec; }
+    .omt-board-current { border:2px solid #e8e9ec; cursor:pointer; }
     .omt-board-match.omt-board-guess { border:2px solid #e6a64c; }
     .omt-board-match.omt-board-guess span { color:#ffd993; }
     .omt-board-match.omt-board-unavailable { display:grid; place-content:center; gap:7px; padding:18px; border-style:dashed; color:#c8cbd0; text-align:center; }
     .omt-board-match.omt-board-unavailable span { position:static; padding:0; color:#ffd993; background:none; font-weight:700; }
     .omt-board-match.omt-board-unavailable p { margin:0; max-width:180px; color:#aeb2b8; font-size:11px; line-height:1.35; }
+    .omt-board-image-unavailable { position:absolute; z-index:3; inset:0; display:grid; place-items:center; padding:16px; color:#c8cbd0; background:#090a0ce8; font-size:11px; font-weight:650; text-align:center; }
     /* Heading, pitch and FOV stay canonical while hydration requests the cell's
        aspect ratio at Google's useful resolution ceiling. */
     .omt-board-current > img,.omt-board-match > img { display:block; width:100%; height:100%; object-fit:cover; object-position:center; }
@@ -2139,8 +2140,15 @@
     let revealTimer = 0;
     const reveal = () => {
       if (Number(container.dataset.omtNativeGeneration) !== generation) return;
-      const status = panorama.getStatus?.();
-      if (!maps?.StreetViewStatus || status === maps.StreetViewStatus.OK) {
+      const hasStatus = typeof panorama.getStatus === "function";
+      const status = hasStatus ? panorama.getStatus() : null;
+      // Some Google Maps builds do not expose StreetViewPanorama#getStatus.
+      // In those builds pano_changed plus a non-empty getPano() is the only
+      // usable readiness signal; requiring an unavailable status method left
+      // the sharp renderer permanently transparent over its thumbnail.
+      const ready = !maps?.StreetViewStatus
+        || (hasStatus ? status === maps.StreetViewStatus.OK : Boolean(panorama.getPano?.()));
+      if (ready) {
         window.clearTimeout(revealTimer);
         // `pano_changed` and OK status precede the first painted tile by a few
         // frames. Keep the correctly filled thumbnail beneath it during that
@@ -2163,9 +2171,15 @@
   function retargetNativeStreetView(entry, panoId, heading) {
     if (!entry?.host || !entry.panorama) return null;
     armNativePanoReveal(entry.host, entry.panorama);
+    entry.panorama.setVisible?.(true);
     entry.panorama.setPov?.({ heading: Number(heading) || 0, pitch: 0 });
     entry.panorama.setPano?.(String(panoId));
     pageWindow.google?.maps?.event?.trigger?.(entry.panorama, "resize");
+    requestAnimationFrame(() => {
+      if (entry.host?.isConnected) {
+        pageWindow.google?.maps?.event?.trigger?.(entry.panorama, "resize");
+      }
+    });
     return entry.panorama;
   }
 
@@ -2178,9 +2192,11 @@
       cached.usedAt = Date.now();
       if (cached.host === slot) return cached.panorama;
       slot.replaceWith(cached.host);
-      // the widget was last laid out at the attic's size, so tell it to re-fit
-      pageWindow.google?.maps?.event?.trigger?.(cached.panorama, "resize");
-      return cached.panorama;
+      // A renderer can have been parked while Google was still loading it, or
+      // can lose its painted surface while off-screen. Re-arm and re-target an
+      // exact cache hit as well as an LRU reuse. Until it proves ready, the
+      // correctly framed thumbnail beneath it remains visible.
+      return retargetNativeStreetView(cached, panoId, heading);
     }
 
     // Once four contexts exist, recycle the least-recently-used renderer. This
@@ -2431,7 +2447,7 @@
       : mode.guessUnavailable
         ? "<span><b>No nearby comparison</b> available for your guess</span>"
         : "";
-    element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid" style="grid-template-columns:repeat(${state.boardGrid},1fr);grid-template-rows:repeat(${state.boardGrid},1fr)"><div class="omt-board-current" tabindex="0" data-board-pano="${esc(board.panoId)}" data-board-heading="${Number(mode.currentHeading) || 0}" data-board-inspect data-board-label="This round" data-board-detail="The panorama this round spawned on">${tileImages(board.panoId, mode.currentHeading, `data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0"`, "This round")}<strong>This round</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}${board.corpus
+    element.innerHTML = `<header class="omt-board-head"><div><h2>Visual comparison</h2><p>${esc(interpretation)} Shift + hover to enlarge; click a match to open it.</p></div><nav class="omt-board-tabs">${tabs}</nav><button class="omt-board-close">Close <kbd>V</kbd></button></header><main class="omt-board-body"><div class="omt-board-grid" style="grid-template-columns:repeat(${state.boardGrid},1fr);grid-template-rows:repeat(${state.boardGrid},1fr)"><div class="omt-board-current" tabindex="0" role="button" aria-label="This round. Open this panorama in Google Maps" data-board-current data-board-pano="${esc(board.panoId)}" data-board-heading="${Number(mode.currentHeading) || 0}" data-board-inspect data-board-label="This round" data-board-detail="The panorama this round spawned on">${tileImages(board.panoId, mode.currentHeading, `data-board-content-mode="${esc(mode.id)}" data-board-content-digest="${esc(contentDigest)}" data-board-slot="0"`, "This round")}<strong>This round</strong></div>${matches}</div></main><footer class="omt-board-foot">${guessReceipt}${board.corpus
         ? `<span><b>${mode.support}</b> of ${mode.supportOf} in the close core</span><span><b>${mode.independentAreas}</b> separate areas</span>`
         : `<span><b>${literal ? "nearest visual views" : `${mode.support}/100`}</b> in this group</span><span><b>${mode.reciprocalSupport}</b> mutual matches</span><span><b>${mode.independentAreas}</b> separate areas</span><span><b>${Math.round(mode.coherence * 100)}%</b> visual agreement</span>`}<span class="omt-board-warning">Visual similarity is evidence, not certainty.</span></footer>`;
     state.shadow.appendChild(element);
@@ -2449,13 +2465,24 @@
           && (entry.kind || "global") === (button.dataset.boardKind || "global")
         ));
         if (!item) return;
-        openMatchInGoogleMaps({
-          lat: item.latitude,
-          lng: item.longitude,
-          panoId: item.panoId,
+        openMatchInGoogleMaps(item, {
+          omitPano: button.dataset.boardPanoUnavailable === "true",
         });
       });
     }
+    const currentTile = element.querySelector("[data-board-current]");
+    const openCurrentRound = () => openMatchInGoogleMaps({
+      ...state.review?.location,
+      panoId: board.panoId,
+    }, {
+      omitPano: currentTile?.dataset.boardPanoUnavailable === "true",
+    });
+    currentTile?.addEventListener("click", openCurrentRound);
+    currentTile?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openCurrentRound();
+    });
     const hidePeek = () => {
       const peek = element.querySelector(".omt-board-peek");
       // move the live widget out before the peek is removed, or it goes with it
@@ -2464,6 +2491,7 @@
     };
     const showPeek = (tile) => {
       hidePeek();
+      if (tile?.dataset?.boardPanoUnavailable === "true") return;
       if (!tile?.dataset?.boardPano && !tile.querySelector("img")) return;
       const peek = buildBoardPeek(tile);
       element.appendChild(peek);
@@ -2933,19 +2961,32 @@
     }
   }
 
-  function openMatchInGoogleMaps(point) {
-    const params = new URLSearchParams({
-      api: "1",
-      map_action: "pano",
-      viewpoint: `${point.lat},${point.lng}`,
-    });
-    if (point.panoId) params.set("pano", point.panoId);
+  function finiteCoordinate(value, minimum, maximum) {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= minimum && number <= maximum
+      ? number
+      : null;
+  }
+
+  function openMatchInGoogleMaps(point, options = {}) {
+    const panoId = options.omitPano
+      ? ""
+      : decodedPanoId(point?.panoId ?? point?.p ?? "");
+    const latitude = finiteCoordinate(point?.lat ?? point?.latitude, -90, 90);
+    const longitude = finiteCoordinate(point?.lng ?? point?.longitude ?? point?.lon, -180, 180);
+    const hasCoordinates = latitude !== null && longitude !== null;
+    if (!panoId && !hasCoordinates) return false;
+    const params = new URLSearchParams({ api: "1", map_action: "pano" });
+    if (hasCoordinates) params.set("viewpoint", `${latitude},${longitude}`);
+    if (panoId) params.set("pano", panoId);
     const url = `https://www.google.com/maps/@?${params}`;
     if (typeof GM_openInTab === "function") {
       GM_openInTab(url, { active: true, insert: true, setParent: true });
     } else {
       window.open(url, "_blank", "noopener,noreferrer");
     }
+    return true;
   }
 
   function handleMatchTooltipModifier(event) {
@@ -2965,6 +3006,46 @@
     applyMatchTooltipExpansion();
   }
 
+  function imageIsUniformlyBlack(image) {
+    if (!image?.complete || image.naturalWidth < 1 || image.naturalHeight < 1) return false;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 8;
+      canvas.height = 8;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return false;
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let offset = 0; offset < pixels.length; offset += 4) {
+        if (pixels[offset] > 4 || pixels[offset + 1] > 4 || pixels[offset + 2] > 4) {
+          return false;
+        }
+      }
+      return true;
+    } catch (_error) {
+      // A future thumbnail host may not permit canvas inspection. Loading the
+      // image remains preferable to treating an unreadable image as broken.
+      return false;
+    }
+  }
+
+  function finalizeBoardImageAvailability(scope) {
+    for (const tile of scope.querySelectorAll?.("[data-board-inspect]") || []) {
+      const images = [...tile.querySelectorAll("img[data-omt-board-image-state]")];
+      if (!images.length || !images.every((image) => (
+        image.dataset.omtBoardImageState === "blank"
+        || image.dataset.omtBoardImageState === "failed"
+      ))) continue;
+      tile.dataset.boardPanoUnavailable = "true";
+      if (!tile.querySelector(".omt-board-image-unavailable")) {
+        const notice = document.createElement("div");
+        notice.className = "omt-board-image-unavailable";
+        notice.textContent = "Panorama unavailable";
+        tile.appendChild(notice);
+      }
+    }
+  }
+
   async function hydrateImages(scope = state.shadow) {
     const images = [...scope.querySelectorAll("img[data-src]")];
     await Promise.all(images.map(async (image) => {
@@ -2978,17 +3059,24 @@
         const resolved = await imageUrl(path);
         // Every board, tooltip and peek image uses the box-fitting maximum-size
         // request while native Street View remains an on-demand enlargement.
-        image.src = fitViewToBox(resolved, box.width, box.height);
+        const fitted = fitViewToBox(resolved, box.width, box.height);
+        if (/^https:\/\/streetviewpixels-pa\.googleapis\.com\//.test(fitted)) {
+          image.crossOrigin = "anonymous";
+        }
+        image.src = fitted;
         if (typeof image.decode === "function") await image.decode();
+        const blank = imageIsUniformlyBlack(image);
+        image.dataset.omtBoardImageState = blank ? "blank" : "rendered";
         if (contentMode && Number.isInteger(contentSlot)) {
           markBoardContentStatus(
             contentMode,
             contentDigest,
             contentSlot,
-            image.isConnected ? "rendered" : "removedBeforeLoad",
+            blank ? "failedToLoad" : image.isConnected ? "rendered" : "removedBeforeLoad",
           );
         }
       } catch (_error) {
+        image.dataset.omtBoardImageState = "failed";
         image.alt = `${image.alt} (image unavailable)`;
         if (contentMode && Number.isInteger(contentSlot)) {
           markBoardContentStatus(
@@ -3000,6 +3088,7 @@
         }
       }
     }));
+    finalizeBoardImageAvailability(scope);
   }
 
   async function openLightbox(path, label) {

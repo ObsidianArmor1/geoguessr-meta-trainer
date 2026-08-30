@@ -92,7 +92,10 @@ pinned to revision `cb2f79b29f1b6dbe6c7c1eb954fbc9556900da91` and manifest gener
   stitched mosaics and passive native-renderer resource pressure.
   Shift + hover enlarges a cell. The compact board can stay road-facing while
   the shared Shift-enlargement setting shows four maximum-size thumbnails and
-  upgrades each direction to cached native Street View tiles.
+  upgrades each direction to cached native Street View tiles. Every cell,
+  including **This round**, opens its panorama in Google Maps. Panorama IDs
+  that now return Google's all-black unavailable image are labeled rather than
+  presented as valid visual evidence.
 - The near-guess comparison considers every corpus view within 10 km. If that
   yields fewer than 160 views, it expands to the nearest 160, up to a 100 km
   cap. It chooses the view visually closest to the round—exact top-300
