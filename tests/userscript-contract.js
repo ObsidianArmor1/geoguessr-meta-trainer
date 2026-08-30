@@ -54,6 +54,10 @@ assert.match(source, /if \(nativePanoCache\.size >= NATIVE_PANO_POOL_LIMIT\)/,
   "later Shift hovers recycle an existing Street View renderer");
 assert.match(source, /entry\.panorama\.setPano\?\.\(String\(panoId\)\)/,
   "the renderer pool retargets rather than accumulating WebGL contexts");
+assert.match(source, /if \(cached && cached\.host\)[\s\S]{0,500}return retargetNativeStreetView\(cached, panoId, heading\)/,
+  "an exact cached renderer is re-armed after off-screen parking instead of remaining blank");
+assert.match(source, /hasStatus \? status === maps\.StreetViewStatus\.OK : Boolean\(panorama\.getPano\?\.\(\)\)/,
+  "native previews can become ready in Google Maps builds without getStatus");
 assert.doesNotMatch(source, /NATIVE_PANO_CACHE_LIMIT = 12/,
   "the context-evicting 12-renderer cache must not return");
 assert.match(source, /function passiveMapIcon\(/,
@@ -137,15 +141,35 @@ assert.match(source, /state\.overlayMap !== map[\s\S]{0,100}state\.overlayRoundK
   "overlays attached to a replaced Live result map are repainted");
 assert.match(source, /\.omt-board-current > img,\.omt-board-match > img \{[^}]*object-fit:cover/,
   "single-direction V-board thumbnails fill their cells instead of becoming a letterboxed square");
+assert.match(source, /data-board-current[\s\S]{0,4500}currentTile\?\.addEventListener\("click", openCurrentRound\)/,
+  "the V-board's This round tile opens its panorama like every comparison tile");
+assert.match(source, /currentTile\?\.addEventListener\("keydown",[\s\S]{0,180}event\.key !== "Enter" && event\.key !== " "/,
+  "the keyboard-focusable This round tile has matching keyboard activation");
 assert.match(source, /const aspect = boxWidth \/ boxHeight;[\s\S]{0,250}Math\.round\(640 \/ aspect\)/,
   "Street View thumbnails preserve the display box aspect at the endpoint's useful resolution ceiling");
-assert.match(source, /image\.src = fitViewToBox\(resolved, box\.width, box\.height\)/,
+assert.match(source, /const fitted = fitViewToBox\(resolved, box\.width, box\.height\)[\s\S]{0,220}image\.src = fitted/,
   "ordinary V-board thumbnails are not left at the soft 448x256 embedding input size");
+assert.match(source, /function imageIsUniformlyBlack\([\s\S]{0,900}pixels\[offset \+ 2\] > 4/,
+  "the V-board recognizes Google's successful-but-all-black stale-pano response");
+assert.match(source, /tile\.dataset\.boardPanoUnavailable = "true"[\s\S]{0,320}Panorama unavailable/,
+  "a fully blank panorama is labeled instead of presented as an unexplained black tile");
+const mapsOpenBody = source.slice(
+  source.indexOf("function finiteCoordinate("),
+  source.indexOf("function handleMatchTooltipModifier("),
+);
+assert.match(mapsOpenBody, /point\?\.lat \?\? point\?\.latitude/,
+  "Google Maps links accept both overlay and corpus latitude field names");
+assert.match(mapsOpenBody, /point\?\.lng \?\? point\?\.longitude \?\? point\?\.lon/,
+  "Google Maps links accept every supported longitude field name");
+assert.match(mapsOpenBody, /if \(hasCoordinates\) params\.set\("viewpoint"/,
+  "missing coordinates are omitted instead of serialized into a 0,0 target");
+assert.match(mapsOpenBody, /if \(panoId\) params\.set\("pano"/,
+  "a valid panorama ID remains authoritative when coordinates are absent");
 assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.92/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.93/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -159,7 +183,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.92/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.93/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");
