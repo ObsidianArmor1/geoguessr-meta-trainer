@@ -153,6 +153,20 @@ assert.match(source, /function imageIsUniformlyBlack\([\s\S]{0,900}pixels\[offse
   "the V-board recognizes Google's successful-but-all-black stale-pano response");
 assert.match(source, /tile\.dataset\.boardPanoUnavailable = "true"[\s\S]{0,320}Panorama unavailable/,
   "a fully blank panorama is labeled instead of presented as an unexplained black tile");
+assert.match(source, /entirelyBlank[\s\S]{0,700}recoverUnavailableNearGuess\(tile\)/,
+  "an all-black near-guess choice automatically advances instead of wasting its board slot");
+const nearGuessRecoveryBody = source.slice(
+  source.indexOf("async function recoverUnavailableNearGuess("),
+  source.indexOf("function finalizeBoardImageAvailability("),
+);
+assert.match(nearGuessRecoveryBody, /state\.nearGuessUnavailablePanoIds\.add\(panoId\)/,
+  "near-guess recovery cannot select the same stale panorama again");
+assert.match(nearGuessRecoveryBody, /const comparison = await loadGuessNeighborhood\(token\)/,
+  "near-guess recovery reruns the actual adaptive visual selection");
+assert.match(source, /excludePanoIds: \[\.\.\.state\.nearGuessUnavailablePanoIds\]/,
+  "the adaptive search receives every unavailable panorama found this round");
+assert.match(source, /status: "recovered-near-guess"/,
+  "diagnostics record successful automatic replacement without needing reproduction");
 const mapsOpenBody = source.slice(
   source.indexOf("function finiteCoordinate("),
   source.indexOf("function handleMatchTooltipModifier("),
@@ -169,7 +183,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.93/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.94/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -183,7 +197,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.93/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.94/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");

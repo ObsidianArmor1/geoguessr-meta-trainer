@@ -875,7 +875,10 @@
     const minimumKm = Number.isFinite(options.minimumKm) ? options.minimumKm : 10;
     const maximumKm = Number.isFinite(options.maximumKm) ? options.maximumKm : 100;
     const targetCandidates = Math.max(1, Number(options.targetCandidates) || 160);
-    const excludedPanoId = String(options.excludePanoId || "");
+    const excludedPanoIds = new Set([
+      options.excludePanoId,
+      ...(Array.isArray(options.excludePanoIds) ? options.excludePanoIds : []),
+    ].map((value) => String(value || "")).filter(Boolean));
     Object.assign(runtime.localVisual, {
       status: "loading", candidatePool: 0, poolRadiusKm: null, loadedCells: 0,
       selection: null, durationMs: null, error: null,
@@ -907,7 +910,7 @@
         loadedCells += batch.length;
         for (const records of loaded) {
           for (const candidate of records) {
-            if (candidate.panoId === excludedPanoId) continue;
+            if (excludedPanoIds.has(candidate.panoId)) continue;
             const distanceKm = haversineKm(
               latitude, longitude, candidate.latitude, candidate.longitude,
             );

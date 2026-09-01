@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    sightline-orlando-meta
-// @version      2.2.0-beta.93
+// @version      2.2.0-beta.94
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.93
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.93
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.93
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.93
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.94
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.94
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.94
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.94
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.93";
+  const USERSCRIPT_VERSION = "2.2.0-beta.94";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -195,6 +195,7 @@
     guessNeighborhoodRoundKey: "",
     guessNeighborhoodPromise: null,
     guessNeighborhoodPromiseKey: "",
+    nearGuessUnavailablePanoIds: new Set(),
     active: 0,
     detail: new Map(),
     drawerOpen: false,
@@ -3029,9 +3030,62 @@
     }
   }
 
+  async function recoverUnavailableNearGuess(tile) {
+    if (!state.review?.universal || tile?.dataset?.boardKind !== "guess-local") return false;
+    const panoId = decodedPanoId(tile.dataset.boardPano);
+    if (!panoId || state.nearGuessUnavailablePanoIds.has(panoId)
+        || state.nearGuessUnavailablePanoIds.size >= 6) return false;
+    const review = state.review;
+    const reviewRoundKey = state.reviewRoundKey;
+    const token = state.requestToken;
+    state.nearGuessUnavailablePanoIds.add(panoId);
+    const notice = tile.querySelector(".omt-board-image-unavailable");
+    if (notice) notice.textContent = "Finding another nearby panorama…";
+    state.diagnostics.boardImagery = {
+      status: "recovering-near-guess",
+      unavailablePanoId: panoId,
+      attempts: state.nearGuessUnavailablePanoIds.size,
+      at: new Date().toISOString(),
+    };
+    state.guessNeighborhood = null;
+    state.guessNeighborhoodRoundKey = "";
+    try {
+      const comparison = await loadGuessNeighborhood(token);
+      if (!comparison || token !== state.requestToken || state.review !== review
+          || state.reviewRoundKey !== reviewRoundKey) return false;
+      const replacementPanoId = decodedPanoId(comparison.guessAnchor?.panoId);
+      if (!replacementPanoId || state.nearGuessUnavailablePanoIds.has(replacementPanoId)) {
+        return false;
+      }
+      state.diagnostics.boardImagery = {
+        status: "recovered-near-guess",
+        unavailablePanoId: panoId,
+        replacementPanoId,
+        attempts: state.nearGuessUnavailablePanoIds.size,
+        at: new Date().toISOString(),
+      };
+      if (state.visualBoardOpen) await openVisualBoard();
+      return true;
+    } catch (error) {
+      if (token === state.requestToken && state.review === review) {
+        state.diagnostics.boardImagery = {
+          status: "failed-near-guess-recovery",
+          unavailablePanoId: panoId,
+          attempts: state.nearGuessUnavailablePanoIds.size,
+          error: String(error?.message || error).slice(0, 240),
+          at: new Date().toISOString(),
+        };
+      }
+      return false;
+    }
+  }
+
   function finalizeBoardImageAvailability(scope) {
     for (const tile of scope.querySelectorAll?.("[data-board-inspect]") || []) {
       const images = [...tile.querySelectorAll("img[data-omt-board-image-state]")];
+      const entirelyBlank = images.length > 0 && images.every(
+        (image) => image.dataset.omtBoardImageState === "blank",
+      );
       if (!images.length || !images.every((image) => (
         image.dataset.omtBoardImageState === "blank"
         || image.dataset.omtBoardImageState === "failed"
@@ -3043,6 +3097,7 @@
         notice.textContent = "Panorama unavailable";
         tile.appendChild(notice);
       }
+      if (entirelyBlank) void recoverUnavailableNearGuess(tile);
     }
   }
 
@@ -4355,6 +4410,7 @@
     state.guessNeighborhoodRoundKey = "";
     state.guessNeighborhoodPromise = null;
     state.guessNeighborhoodPromiseKey = "";
+    state.nearGuessUnavailablePanoIds.clear();
     state.active = 0;
     state.detail.clear();
     state.drawerOpen = false;
@@ -4542,7 +4598,11 @@
           // Corpus path: no dataset to query, so the pack answers directly.
           comparison = await cradioClient.guessNeighborhood(
             guess,
-            { sourceMapKey: review.sourceMapKey, roundPanoId: review.location?.panoId },
+            {
+              sourceMapKey: review.sourceMapKey,
+              roundPanoId: review.location?.panoId,
+              excludePanoIds: [...state.nearGuessUnavailablePanoIds],
+            },
             review.visualNeighborhood?.visualMatches || [],
           );
         } else {
