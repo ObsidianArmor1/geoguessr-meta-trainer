@@ -258,11 +258,13 @@ async function main() {
   };
   const adaptiveGuess = await new ModalCradioClient(storage()).guessNeighborhood(
     { lat: 48, lng: 7 },
-    { roundPanoId: queryPano },
+    { roundPanoId: queryPano, excludePanoIds: ["stale-local"] },
     rawResponse.matches,
   );
   assert.equal(adaptiveOptions.excludePanoId, queryPano,
     "the round itself cannot become its own near-guess example");
+  assert.deepEqual(adaptiveOptions.excludePanoIds, ["stale-local"],
+    "unavailable near-guess panoramas reach the adaptive replacement search");
   assert.equal(adaptiveOptions.minimumKm, 10);
   assert.equal(adaptiveOptions.targetCandidates, 160);
   assert.equal(adaptiveOptions.maximumKm, 100);

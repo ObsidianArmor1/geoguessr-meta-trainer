@@ -142,6 +142,20 @@ function half(bits) {
   assert.equal(pack.diagnostics().localVisual.status, "complete");
   assert.ok(pack.diagnostics().localVisual.loadedCells > 0);
 
+  const replacementLocalVisual = await pack.nearbyVisual(sourceLatitude, sourceLongitude, {
+    roundPanoId: sourcePano,
+    excludePanoId: sourcePano,
+    excludePanoIds: [localVisual.panoId],
+    minimumKm: 0,
+    targetCandidates: 16,
+    maximumKm: 21000,
+    roundMatches: [],
+  });
+  assert.ok(replacementLocalVisual,
+    "a stale near-guess panorama can be replaced from the same adaptive pool");
+  assert.notEqual(replacementLocalVisual.panoId, localVisual.panoId,
+    "the replacement search honors all unavailable panorama IDs");
+
   const exactLocalVisual = await pack.nearbyVisual(sourceLatitude, sourceLongitude, {
     roundPanoId: sourcePano,
     excludePanoId: sourcePano,

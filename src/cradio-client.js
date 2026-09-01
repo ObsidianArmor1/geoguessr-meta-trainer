@@ -514,6 +514,7 @@
               roundPanoId,
               roundMatches,
               excludePanoId: roundPanoId,
+              excludePanoIds: context.excludePanoIds,
               minimumKm: Number(context.guessMinimumKm) || 10,
               targetCandidates: Number(context.guessTargetCandidates) || 160,
               maximumKm: Number(context.guessMaximumKm) || 100,
