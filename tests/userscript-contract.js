@@ -107,12 +107,16 @@ assert.match(source, /captureSubmittedGuess\(url, init\?\.body\)/,
   "Live Challenge captures the user's authoritative outgoing fetch guess");
 assert.match(source, /captureSubmittedGuess\(this\.__OMT_LIVE_URL, body\)/,
   "Live Challenge captures the user's authoritative outgoing XHR guess");
-assert.match(source, /liveChallengeAdapter\.matchingGuess\(data, lifecycle\.announcedRound, state\.pendingPlayerGuess\)/,
-  "a submitted pin identifies the user's result even when GeoGuessr profile IDs drift");
+assert.match(source, /const guessEpoch = challengeEpoch\.capture\(\);[\s\S]{0,80}guessEpoch\.challengeId !== challengeId\) return;/,
+  "a delayed old-game request body cannot restore stale pending-guess state");
+assert.match(source, /liveChallengeAdapter\.matchingPendingGuess\(\s*data,\s*challengeId,\s*lifecycle\.announcedRound,\s*state\.pendingPlayerGuess/,
+  "a submitted pin identifies the user's result only within its challenge and round");
 assert.match(source, /round && !round\.playerGuess && recoveredGuess/,
   "a recovered Live Challenge guess reaches the shared round-end pipeline without replacing API truth");
-assert.match(source, /\|\| state\.pendingPlayerGuess;/,
-  "the shared review retains a final submitted-pin fallback for blue comparisons");
+assert.match(roundEndBody, /liveChallengePendingGuess\(eventChallengeId, rounds\.length\)/,
+  "the shared review accepts a submitted-pin fallback only for the owning Live game and round");
+assert.match(roundEndBody, /state\.pendingPlayerGuess\?\.challengeId[\s\S]{0,180}liveChallengeAdapter\.coordinates\(state\.pendingPlayerGuess\)/,
+  "ordinary single-player map clicks retain their coordinate fallback without Live ownership metadata");
 assert.match(source, /if \(!state\.root\?\.isConnected\) render\(\)/,
   "a GeoGuessr Live subtree replacement remounts an already-built review");
 assert.match(source, /state\.roundRequestQuality = -1;/,
@@ -123,12 +127,61 @@ assert.match(source, /const pageFetch = pageWindow\.fetch\?\.bind\(pageWindow\)/
   "trainer polling uses a stable fetch that cannot trigger its own request observer");
 assert.match(source, /const dataPromise = pageFetch\(/,
   "Live API polling does not recursively queue itself through the GeoGuessr fetch hook");
+assert.match(source, /liveChallengeAdapter\.trainerPollUrl\(challengeId, trainerPollNonce\)/,
+  "every trainer poll carries a per-runtime query nonce");
+assert.match(source, /classifyChallengeResource\(url,[\s\S]{0,300}observation\.kind === "trainer-poll"[\s\S]{0,100}challengeEpoch\.observe\(id, "trainer-poll"\);[\s\S]{0,30}return;/,
+  "a trainer poll is rejected by URL identity before it can alter discovery");
+assert.doesNotMatch(source, /ignoredPerformanceResources|takeIgnoredPerformanceResource|expiresAt: now \+ 10_000/,
+  "trainer-poll rejection cannot expire with wall-clock time");
+assert.match(source, /fetchTrackingInstalled,[\s\S]{0,80}xhrTrackingInstalled,[\s\S]{0,320}observation\.kind === "observed-duplicate"\) return;/,
+  "Performance entries already observed by installed GeoGuessr request hooks are deterministic duplicates");
+assert.match(source, /bindPendingGuessRound\([\s\S]{0,180}lookupEpoch\.epoch/,
+  "an early unnumbered guess binds only to authoritative state in its owning epoch");
+assert.match(source, /liveChallengeIdFromUrl\(location\.pathname\) === challengeId[\s\S]{0,100}resetLiveChallengeEpoch\(challengeId, "route"\)/,
+  "a direct public Live Challenge route initializes the same epoch guard without party traffic");
+assert.match(source, /const lookupEpoch = challengeEpoch\.capture\(\);[\s\S]{0,250}if \(!challengeEpoch\.owns\(lookupEpoch\)\) return;/,
+  "a delayed lookup must still own the game epoch before it mutates Live review state");
 assert.match(source, /if \(lookupInFlight\) \{\s*checkAfterLookup = true;/,
   "a transition observed during a Live lookup is replayed when that lookup finishes");
 assert.match(source, /liveChallengeAdapter\.outcomeCompletesRound\([\s\S]{0,300}state\.liveChallengeLastRoundKey = liveRound\.roundKey/,
   "a duplicate or stale lookup cannot mark a Live round complete");
 assert.match(roundEndBody, /clearReviewArtifacts\("new-round-result"\)/,
   "an authoritative new result clears every prior-round artifact before lookup");
+const epochResetBody = source.slice(
+  source.indexOf("const resetLiveChallengeEpoch = (challengeId, source) =>"),
+  source.indexOf("const captureSubmittedGuess = (url, body) =>"),
+);
+assert.match(epochResetBody, /clearRound\(\)/,
+  "a challenge switch immediately clears review, overlays, recommendation, board, and guess state");
+for (const field of [
+  "guessPrefetchKey",
+  "guessPrefetchPromise",
+  "boardWarmTimer",
+  "boardPrewarmTimer",
+  "liveChallengeLastRoundKey",
+  "liveChallengePendingKey",
+]) {
+  assert.match(epochResetBody, new RegExp(`state\\.${field}`),
+    `a challenge switch invalidates ${field}`);
+}
+assert.match(epochResetBody, /lastPrewarmedRoundKey = ""/,
+  "a challenge switch invalidates the prior game's active-round prewarm owner");
+const clearReviewBody = source.slice(
+  source.indexOf("function clearReviewArtifacts(reason = \"next-round\")"),
+  source.indexOf("function clearRound()"),
+);
+for (const field of [
+  "review",
+  "fastNeighborhood",
+  "guessNeighborhood",
+  "visualBoard",
+  "roundIdentity",
+]) {
+  assert.match(clearReviewBody, new RegExp(`state\\.${field}`),
+    `epoch reset clears old ${field} state through clearRound`);
+}
+assert.match(clearReviewBody, /clearOverlays\(\)/,
+  "epoch reset removes all old map overlays through clearRound");
 assert.match(roundEndBody, /ownsRoundRequest\(token, requestKey\)/,
   "async round-end work commits only while it still owns the current request");
 assert.match(roundEndBody, /Similarity response belonged to another panorama/,
@@ -183,7 +236,7 @@ assert.match(source, /role: "nearGuessUnavailable"/,
   "the V-board receipt records an unavailable near-guess comparison explicitly");
 assert.match(source, /No nearby view is available for this guess\./,
   "the V-board explains why a submitted guess has no nearby comparison tile");
-assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.94/,
+assert.match(source, /src\/cradio-client\.js\?v=2\.2\.0-beta\.95/,
   "Tampermonkey receives a fresh comparison client when its board behavior changes");
 assert.match(source, /const partyAwaitingResult = PARTY_LOBBY_PATH\.test\(location\.pathname\) && !mounted;/,
   "a private party does not treat this player's submitted guess as the round result");
@@ -197,7 +250,7 @@ assert.match(source, /restoredGuess\([\s\S]{0,250}challengeId,[\s\S]{0,100}round
   "reload recovery is keyed to the exact challenge and round");
 assert.match(source, /if \(round && !round\.playerGuess && recoveredGuess\) round\.playerGuess = recoveredGuess/,
   "the recovered submitted guess reaches the shared review pipeline without replacing API truth");
-assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.94/,
+assert.match(source, /src\/lodestar-pack-v2\.js\?v=2\.2\.0-beta\.95/,
   "Tampermonkey receives the cache-preserving Pack V2 client in this release");
 assert.match(source, /prefetchGuessSide\(guess\.lat, guess\.lng, \{ immediate: true \}\)/,
   "submitting a guess starts its blue-cloud warm immediately");

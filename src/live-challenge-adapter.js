@@ -3,6 +3,7 @@
 
   const LIVE_CHALLENGE_PATH = /^\/(?:api\/)?live-challenge\/([^/?#]+)(?:\/[^?#]*)?\/?$/;
   const PARTY_LOBBY_PATH = /^\/party\/lobby\/[^/?#]+\/?$/;
+  const TRAINER_POLL_QUERY = "omtTrainerPoll";
   const RESULT_SELECTORS = Object.freeze([
     '[class*="result-map_roundPin"]',
     '[class*="result-map_round-pin"]',
@@ -29,17 +30,54 @@
     return pathnameFromUrl(value).match(LIVE_CHALLENGE_PATH)?.[1] || null;
   }
 
+  function trainerPollUrl(challengeId, nonce) {
+    const url = new URL(
+      `https://game-server.geoguessr.com/api/live-challenge/${encodeURIComponent(challengeId)}`,
+    );
+    url.searchParams.set(TRAINER_POLL_QUERY, String(nonce));
+    return url.href;
+  }
+
+  function isTrainerPollUrl(value, nonce) {
+    try {
+      const url = new URL(value, "https://www.geoguessr.com");
+      return Boolean(challengeIdFromUrl(url.href))
+        && url.searchParams.get(TRAINER_POLL_QUERY) === String(nonce);
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function classifyChallengeResource(value, options = {}) {
+    const challengeId = challengeIdFromUrl(value);
+    if (!challengeId) return { challengeId: null, kind: "unrelated" };
+    if (options.trainerPollNonce != null
+        && isTrainerPollUrl(value, options.trainerPollNonce)) {
+      return { challengeId, kind: "trainer-poll" };
+    }
+    if (options.source === "performance"
+        && ((options.initiatorType === "fetch" && options.fetchTrackingInstalled)
+          || (options.initiatorType === "xmlhttprequest" && options.xhrTrackingInstalled))) {
+      return { challengeId, kind: "observed-duplicate" };
+    }
+    return { challengeId, kind: "geoguessr" };
+  }
+
   function challengeIdForPage(pathname, resourceUrls = [], trackedChallenge = null) {
     const routeId = challengeIdFromUrl(pathname);
     if (routeId) return routeId;
     if (!PARTY_LOBBY_PATH.test(pathnameFromUrl(pathname))) return null;
+    // Once current-page traffic has identified a party game, historical
+    // Resource Timing entries must not be allowed to reclaim discovery. Those
+    // entries include the trainer's own older polling requests.
+    if (trackedChallenge?.partyLobbyPath === pathnameFromUrl(pathname)) {
+      return trackedChallenge.id;
+    }
     for (let index = resourceUrls.length - 1; index >= 0; index -= 1) {
       const id = challengeIdFromUrl(resourceUrls[index]);
       if (id) return id;
     }
-    return trackedChallenge?.partyLobbyPath === pathnameFromUrl(pathname)
-      ? trackedChallenge.id
-      : null;
+    return null;
   }
 
   function isLiveChallengePage(pathname, resourceUrls = [], trackedChallenge = null) {
@@ -327,6 +365,129 @@
     return visit(value, 0);
   }
 
+  function submittedRoundNumber(body) {
+    let value = body;
+    if (value && typeof value.get === "function") {
+      const raw = value.get("roundNumber") ?? value.get("round") ?? value.get("currentRound");
+      const number = Number(raw);
+      return Number.isInteger(number) && number > 0 ? number : null;
+    }
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch (_error) {
+        const params = new URLSearchParams(value);
+        const raw = params.get("roundNumber") ?? params.get("round") ?? params.get("currentRound");
+        const number = Number(raw);
+        return Number.isInteger(number) && number > 0 ? number : null;
+      }
+    }
+    const seen = new Set();
+    const visit = (item, depth) => {
+      if (!item || typeof item !== "object" || depth > 6 || seen.has(item)) return null;
+      seen.add(item);
+      for (const [key, child] of Object.entries(item)) {
+        if (/^(roundNumber|round|currentRound)$/i.test(key)) {
+          const number = Number(child);
+          if (Number.isInteger(number) && number > 0) return number;
+        }
+      }
+      for (const child of Object.values(item)) {
+        const found = visit(child, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    };
+    return visit(value, 0);
+  }
+
+  function capturedGuessRecord(
+    challengeId,
+    roundNumber,
+    guess,
+    submittedAt = Date.now(),
+    gameEpoch = null,
+  ) {
+    const normalizedGuess = coordinates(guess);
+    const normalizedRound = roundNumber == null ? null : Number(roundNumber);
+    const normalizedTime = Number(submittedAt);
+    const normalizedEpoch = gameEpoch == null ? null : Number(gameEpoch);
+    if (!scalar(challengeId) || !normalizedGuess || !Number.isFinite(normalizedTime)
+        || (normalizedRound != null
+          && (!Number.isInteger(normalizedRound) || normalizedRound < 1))
+        || (normalizedEpoch != null
+          && (!Number.isInteger(normalizedEpoch) || normalizedEpoch < 1))) return null;
+    return {
+      challengeId: String(challengeId),
+      roundNumber: normalizedRound,
+      guess: normalizedGuess,
+      submittedAt: normalizedTime,
+      gameEpoch: normalizedEpoch,
+    };
+  }
+
+  function ownedPendingGuess(record, challengeId, roundNumber, gameEpoch = null) {
+    if (!record || String(record.challengeId || "") !== String(challengeId || "")) return null;
+    const wantedRound = Number(roundNumber);
+    const wantedEpoch = gameEpoch == null ? null : Number(gameEpoch);
+    if (!Number.isInteger(wantedRound) || Number(record.roundNumber) !== wantedRound
+        || (wantedEpoch != null && Number(record.gameEpoch) !== wantedEpoch)) return null;
+    return coordinates(record.guess);
+  }
+
+  function matchingPendingGuess(data, challengeId, roundNumber, record, gameEpoch = null) {
+    if (!record || String(record.challengeId || "") !== String(challengeId || "")) return null;
+    const wantedRound = Number(roundNumber);
+    const wantedEpoch = gameEpoch == null ? null : Number(gameEpoch);
+    if (!Number.isInteger(wantedRound)
+        || (wantedEpoch != null && Number(record.gameEpoch) !== wantedEpoch)
+        || (record.roundNumber != null && Number(record.roundNumber) !== wantedRound)) return null;
+    return matchingGuess(data, wantedRound, record.guess);
+  }
+
+  function bindPendingGuessRound(record, challengeId, roundNumber, gameEpoch) {
+    if (!record || record.roundNumber != null
+        || String(record.challengeId || "") !== String(challengeId || "")
+        || Number(record.gameEpoch) !== Number(gameEpoch)) return null;
+    const wantedRound = Number(roundNumber);
+    if (!Number.isInteger(wantedRound) || wantedRound < 1) return null;
+    return capturedGuessRecord(
+      challengeId,
+      wantedRound,
+      record.guess,
+      record.submittedAt,
+      gameEpoch,
+    );
+  }
+
+  function createChallengeEpoch(initialChallengeId = null) {
+    let challengeId = scalar(initialChallengeId) || null;
+    let epoch = challengeId ? 1 : 0;
+    const snapshot = () => ({ challengeId, epoch });
+    return {
+      observe(nextChallengeId, source = "geoguessr") {
+        const next = scalar(nextChallengeId) || null;
+        if (!next || source === "trainer-poll") {
+          return { ...snapshot(), changed: false, ignored: source === "trainer-poll" };
+        }
+        const changed = next !== challengeId;
+        if (changed) {
+          challengeId = next;
+          epoch += 1;
+        }
+        return { ...snapshot(), changed, ignored: false };
+      },
+      capture() {
+        return snapshot();
+      },
+      owns(token) {
+        return Boolean(token)
+          && token.epoch === epoch
+          && token.challengeId === challengeId;
+      },
+    };
+  }
+
   function storedGuessRecord(challengeId, roundNumber, guess, submittedAt = Date.now()) {
     const normalizedGuess = coordinates(guess);
     const normalizedRound = Number(roundNumber);
@@ -511,9 +672,13 @@
   const api = {
     LIVE_CHALLENGE_PATH,
     PARTY_LOBBY_PATH,
+    TRAINER_POLL_QUERY,
     RESULT_SELECTORS,
     pathnameFromUrl,
     challengeIdFromUrl,
+    trainerPollUrl,
+    isTrainerPollUrl,
+    classifyChallengeResource,
     challengeIdForPage,
     isLiveChallengePage,
     decodePanoId,
@@ -526,6 +691,12 @@
     lifecycle,
     matchingGuess,
     submittedGuess,
+    submittedRoundNumber,
+    capturedGuessRecord,
+    ownedPendingGuess,
+    matchingPendingGuess,
+    bindPendingGuessRound,
+    createChallengeEpoch,
     storedGuessRecord,
     restoredGuess,
     normalizeRound,

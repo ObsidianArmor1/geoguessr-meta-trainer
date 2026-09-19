@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    obsidianarmor-meta-trainer
-// @version      2.2.0-beta.94
+// @version      2.2.0-beta.95
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.94
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.94
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.94
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.94
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.95
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.95
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.95
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.95
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -44,7 +44,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.94";
+  const USERSCRIPT_VERSION = "2.2.0-beta.95";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -205,6 +205,7 @@
     pendingPlayerGuess: null,
     liveChallengeChallengeId: null,
     liveChallengeAnnouncedRound: null,
+    liveChallengeEpoch: 0,
     requestToken: 0,
     root: null,
     shadow: null,
@@ -4699,6 +4700,15 @@
     );
   }
 
+  function liveChallengePendingGuess(challengeId, roundNumber) {
+    return liveChallengeAdapter.ownedPendingGuess(
+      state.pendingPlayerGuess,
+      challengeId,
+      roundNumber,
+      state.liveChallengeEpoch,
+    );
+  }
+
   function rememberLiveChallengeGuess(challengeId, roundNumber, guess) {
     const record = liveChallengeAdapter.storedGuessRecord(
       challengeId,
@@ -4746,9 +4756,9 @@
     return liveChallengeAdapter.normalizeRound(data, challengeId, profileId);
   }
 
-  async function fetchLiveChallengeState(challengeId) {
+  async function fetchLiveChallengeState(challengeId, trainerPollNonce) {
     const dataPromise = pageFetch(
-      `https://game-server.geoguessr.com/api/live-challenge/${encodeURIComponent(challengeId)}`,
+      liveChallengeAdapter.trainerPollUrl(challengeId, trainerPollNonce),
       { method: "GET", credentials: "include", cache: "no-store" }
     ).then(async (response) => {
       if (!response.ok) throw new Error(`Live Challenge returned ${response.status}`);
@@ -4759,12 +4769,14 @@
       liveChallengeProfileId(),
     ]);
     const lifecycle = liveChallengeAdapter.lifecycle(data, profileId);
-    state.liveChallengeChallengeId = challengeId;
-    state.liveChallengeAnnouncedRound = lifecycle.announcedRound;
     const storedGuess = rememberedLiveChallengeGuess(challengeId, lifecycle.announcedRound);
-    const pendingMatch = state.pendingPlayerGuess
-      ? liveChallengeAdapter.matchingGuess(data, lifecycle.announcedRound, state.pendingPlayerGuess)
-      : null;
+    const pendingMatch = liveChallengeAdapter.matchingPendingGuess(
+      data,
+      challengeId,
+      lifecycle.announcedRound,
+      state.pendingPlayerGuess,
+      state.liveChallengeEpoch,
+    );
     const round = normalizedLiveChallengeRound(data, challengeId, profileId);
     const apiGuess = round?.playerGuess || null;
     const recoveredGuess = pendingMatch || storedGuess;
@@ -4792,39 +4804,108 @@
 
   function initializeLiveChallengeAdapter() {
     let trackedChallenge = null;
+    const challengeEpoch = liveChallengeAdapter.createChallengeEpoch();
+    const trainerPollNonce = randomId();
+    let fetchTrackingInstalled = false;
+    let xhrTrackingInstalled = false;
     let checkQueued = false;
     let lookupInFlight = false;
     let checkAfterLookup = false;
     let lastPrewarmedRoundKey = "";
     let queueCheck = () => {};
 
+    const resetLiveChallengeEpoch = (challengeId, source) => {
+      const observation = challengeEpoch.observe(challengeId, source);
+      if (observation.ignored || !observation.changed) return observation;
+      // A private-party route is reused across games. Challenge identity is
+      // therefore the game epoch: invalidate every artifact and async owner at
+      // the moment GeoGuessr reveals a different challenge, not after a poll.
+      clearTimeout(state.offlineRetryTimer);
+      state.offlineRetryTimer = 0;
+      window.clearTimeout(state.guessPrefetchTimer);
+      state.guessPrefetchTimer = 0;
+      state.guessPrefetchKey = "";
+      state.guessPrefetchPromise = null;
+      window.clearTimeout(state.boardWarmTimer);
+      state.boardWarmTimer = 0;
+      window.clearTimeout(state.boardPrewarmTimer);
+      state.boardPrewarmTimer = 0;
+      clearRound();
+      state.liveChallengeChallengeId = challengeId;
+      state.liveChallengeAnnouncedRound = null;
+      state.liveChallengeEpoch = observation.epoch;
+      state.liveChallengeResultVisible = false;
+      state.liveChallengeLastRoundKey = "";
+      state.liveChallengePendingKey = "";
+      lastPrewarmedRoundKey = "";
+      state.diagnostics.liveChallenge = {
+        challengeId,
+        discoveredChallengeId: trackedChallenge?.id || challengeId,
+        authoritativeChallengeId: challengeId,
+        discoverySource: source,
+        epoch: observation.epoch,
+        at: new Date().toISOString(),
+      };
+      return observation;
+    };
+
     const captureSubmittedGuess = (url, body) => {
       const challengeId = liveChallengeIdFromUrl(url);
       if (!challengeId) return;
       const guess = liveChallengeAdapter.submittedGuess(body);
       if (!guess) return;
-      state.pendingPlayerGuess = guess;
-      if (state.liveChallengeChallengeId === challengeId) {
-        rememberLiveChallengeGuess(challengeId, state.liveChallengeAnnouncedRound, guess);
+      // Request.clone().text() resolves asynchronously. If another game was
+      // discovered while that body was being read, the old submission no
+      // longer owns pending-guess state.
+      const guessEpoch = challengeEpoch.capture();
+      if (guessEpoch.challengeId !== challengeId) return;
+      const submittedRound = liveChallengeAdapter.submittedRoundNumber(body)
+        || (state.liveChallengeChallengeId === challengeId
+          ? state.liveChallengeAnnouncedRound
+          : null);
+      state.pendingPlayerGuess = liveChallengeAdapter.capturedGuessRecord(
+        challengeId,
+        submittedRound,
+        guess,
+        Date.now(),
+        guessEpoch.epoch,
+      );
+      if (submittedRound) {
+        rememberLiveChallengeGuess(challengeId, submittedRound, guess);
       }
       state.guessPrefetchKey = "";
       prefetchGuessSide(guess.lat, guess.lng, { immediate: true });
       queueCheck();
     };
 
-    const trackResource = (url) => {
+    const trackResource = (url, source = "geoguessr", initiatorType = "") => {
       if (!PARTY_LOBBY_PATH.test(location.pathname)) return;
-      const id = liveChallengeIdFromUrl(url);
+      const observation = liveChallengeAdapter.classifyChallengeResource(url, {
+        source,
+        initiatorType,
+        trainerPollNonce,
+        fetchTrackingInstalled,
+        xhrTrackingInstalled,
+      });
+      const id = observation.challengeId;
       if (id) {
+        if (observation.kind === "trainer-poll") {
+          challengeEpoch.observe(id, "trainer-poll");
+          return;
+        }
+        if (observation.kind === "observed-duplicate") return;
         trackedChallenge = { id, partyLobbyPath: location.pathname };
+        resetLiveChallengeEpoch(id, source);
         queueCheck();
       }
     };
 
-    for (const entry of performance.getEntriesByType("resource")) trackResource(entry.name);
+    for (const entry of performance.getEntriesByType("resource")) trackResource(entry.name, "bootstrap");
     if (typeof PerformanceObserver !== "undefined") {
       const resourceObserver = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) trackResource(entry.name);
+        for (const entry of list.getEntries()) {
+          trackResource(entry.name, "performance", entry.initiatorType);
+        }
       });
       resourceObserver.observe({ entryTypes: ["resource"] });
     }
@@ -4837,9 +4918,9 @@
       const originalFetch = pageWindow.fetch;
       if (typeof originalFetch === "function") {
         try {
-          pageWindow.fetch = function (input, init) {
+          const trackedFetch = function (input, init) {
             const url = typeof input === "string" ? input : input?.url;
-            trackResource(url);
+            trackResource(url, "fetch");
             captureSubmittedGuess(url, init?.body);
             if (!init?.body && typeof input?.clone === "function") {
               input.clone().text().then((body) => captureSubmittedGuess(url, body)).catch(() => {});
@@ -4848,6 +4929,8 @@
             request.finally(queueCheck).catch(() => {});
             return request;
           };
+          pageWindow.fetch = trackedFetch;
+          fetchTrackingInstalled = pageWindow.fetch === trackedFetch;
         } catch (_error) {
           // PerformanceObserver remains available when a browser locks fetch.
         }
@@ -4856,11 +4939,13 @@
       if (xhr?.open) {
         const originalOpen = xhr.open;
         try {
-          xhr.open = function (method, url, ...args) {
+          const trackedOpen = function (method, url, ...args) {
             this.__OMT_LIVE_URL = url;
-            trackResource(url);
+            trackResource(url, "xhr");
             return originalOpen.call(this, method, url, ...args);
           };
+          xhr.open = trackedOpen;
+          xhrTrackingInstalled = xhr.open === trackedOpen;
           const originalSend = xhr.send;
           if (originalSend) {
             xhr.send = function (body) {
@@ -4880,15 +4965,44 @@
       checkQueued = false;
       const challengeId = liveChallengeIdForPage(trackedChallenge);
       if (!challengeId) return;
+      if (liveChallengeIdFromUrl(location.pathname) === challengeId) {
+        resetLiveChallengeEpoch(challengeId, "route");
+      }
       if (lookupInFlight) {
         checkAfterLookup = true;
         return;
       }
       lookupInFlight = true;
+      const lookupEpoch = challengeEpoch.capture();
+      let ownedPendingKey = "";
       try {
-        const liveState = await fetchLiveChallengeState(challengeId);
+        const liveState = await fetchLiveChallengeState(challengeId, trainerPollNonce);
+        if (!challengeEpoch.owns(lookupEpoch)) return;
+        state.liveChallengeChallengeId = challengeId;
+        state.liveChallengeAnnouncedRound = liveState.lifecycle.announcedRound;
+        const boundPendingGuess = liveChallengeAdapter.bindPendingGuessRound(
+          state.pendingPlayerGuess,
+          challengeId,
+          liveState.lifecycle.announcedRound,
+          lookupEpoch.epoch,
+        );
+        if (boundPendingGuess) {
+          state.pendingPlayerGuess = boundPendingGuess;
+        }
+        const ownedPendingGuess = liveChallengePendingGuess(
+          challengeId,
+          liveState.lifecycle.announcedRound,
+        );
         const resultMount = liveChallengeAdapter.resultMountStatus(document);
         const mounted = resultMount.mounted;
+        if (boundPendingGuess
+            && (liveState.pendingMatch || liveState.lifecycle.phase === "result" || mounted)) {
+          rememberLiveChallengeGuess(
+            challengeId,
+            liveState.lifecycle.announcedRound,
+            boundPendingGuess.guess,
+          );
+        }
         const apiResult = liveState.lifecycle.phase === "result";
         const apiPlaying = liveState.lifecycle.guessedRound > 0
           && liveState.lifecycle.guessedRound < liveState.lifecycle.announcedRound;
@@ -4901,6 +5015,10 @@
         const partyAwaitingResult = PARTY_LOBBY_PATH.test(location.pathname) && !mounted;
         state.diagnostics.liveChallenge = {
           challengeId,
+          discoveredChallengeId: trackedChallenge?.id || null,
+          authoritativeChallengeId: lookupEpoch.challengeId,
+          discoverySource: state.diagnostics.liveChallenge?.discoverySource || null,
+          epoch: lookupEpoch.epoch,
           announcedRound: liveState.lifecycle.announcedRound,
           guessedRound: liveState.lifecycle.guessedRound,
           phase: apiResult ? "result" : apiPlaying ? "playing" : "unknown",
@@ -4913,9 +5031,18 @@
           },
           hasProfileId: Boolean(liveState.profileId),
           hasPendingGuess: Boolean(state.pendingPlayerGuess),
+          pendingGuessOwnership: state.pendingPlayerGuess ? {
+            challengeId: state.pendingPlayerGuess.challengeId || null,
+            roundNumber: state.pendingPlayerGuess.roundNumber || null,
+            gameEpoch: state.pendingPlayerGuess.gameEpoch || null,
+            matchesChallenge: state.pendingPlayerGuess.challengeId === challengeId,
+            matchesRound: state.pendingPlayerGuess.challengeId === challengeId
+              && state.pendingPlayerGuess.roundNumber === liveState.lifecycle.announcedRound,
+            matchesEpoch: state.pendingPlayerGuess.gameEpoch === lookupEpoch.epoch,
+          } : null,
           matchedPendingGuess: Boolean(liveState.pendingMatch),
           hasStoredGuess: Boolean(liveState.storedGuess),
-          guessSource: liveState.guessSource,
+          guessSource: liveState.guessSource || (ownedPendingGuess ? "submitted-epoch" : null),
           at: new Date().toISOString(),
         };
         if (apiPlaying || partyAwaitingResult || (!apiResult && !mounted)) {
@@ -4978,6 +5105,7 @@
           state.roundRequestQuality = -1;
         }
         state.liveChallengePendingKey = liveRound.roundKey;
+        ownedPendingKey = liveRound.roundKey;
         const outcome = await handleRoundEnd(
           liveChallengeAdapter.buildEventState(liveRound, challengeId),
         );
@@ -4993,12 +5121,16 @@
           window.setTimeout(queueCheck, outcome?.status === "pending" ? 120 : 650);
         }
       } catch (error) {
+        if (!challengeEpoch.owns(lookupEpoch)) return;
         console.error("Meta Trainer: Live Challenge round lookup failed", error);
         diagnosticError(error, "live-challenge-round-lookup");
         window.setTimeout(queueCheck, 650);
       } finally {
         lookupInFlight = false;
-        state.liveChallengePendingKey = "";
+        if (challengeEpoch.owns(lookupEpoch)
+            && state.liveChallengePendingKey === ownedPendingKey) {
+          state.liveChallengePendingKey = "";
+        }
         if (checkAfterLookup) {
           checkAfterLookup = false;
           queueCheck();
@@ -5078,8 +5210,18 @@
     state.roundRequestQuality = requestQuality;
     state.lastRoundEventState = eventState;
     state.round = rounds.length;
-    const rawGuess = round.player_guess || round.playerGuess || round.guess
-      || state.pendingPlayerGuess;
+    const eventChallengeId = [
+      round.gameId,
+      eventState?.current_game_id,
+      eventState?.currentGameId,
+      eventState?.token,
+    ].find((value) => value != null && String(value).length);
+    const pendingGuess = state.pendingPlayerGuess?.challengeId
+      ? eventChallengeId
+        ? liveChallengePendingGuess(eventChallengeId, rounds.length)
+        : null
+      : liveChallengeAdapter.coordinates(state.pendingPlayerGuess);
+    const rawGuess = round.player_guess || round.playerGuess || round.guess || pendingGuess;
     const guessLat = Number(rawGuess?.lat ?? rawGuess?.latitude);
     const guessLng = Number(rawGuess?.lng ?? rawGuess?.longitude);
     state.playerGuess = Number.isFinite(guessLat) && Number.isFinite(guessLng)

@@ -85,6 +85,14 @@ assert.equal(adapter.challengeIdForPage(
   [],
   { id: "tracked-game", partyLobbyPath: "/party/lobby/ROOM" },
 ), "tracked-game");
+assert.equal(adapter.challengeIdForPage(
+  "/party/lobby/ROOM",
+  [
+    "https://game-server.geoguessr.com/api/live-challenge/game-b",
+    "https://game-server.geoguessr.com/api/live-challenge/game-a",
+  ],
+  { id: "game-b", partyLobbyPath: "/party/lobby/ROOM" },
+), "game-b", "authoritative current traffic outranks stale trainer Resource Timing entries");
 assert.equal(adapter.isLiveChallengePage("/live-challenge/public-game"), true);
 assert.equal(adapter.isLiveChallengePage(
   "/party/lobby/ROOM",
@@ -232,6 +240,130 @@ assert.deepEqual(adapter.submittedGuess(JSON.stringify({ guess: {
 "an outgoing Live Challenge request reveals the submitted pin");
 assert.deepEqual(adapter.submittedGuess("lat=12.3&lng=-45.6"), { lat: 12.3, lng: -45.6 });
 assert.equal(adapter.submittedGuess("not-json"), null);
+assert.equal(adapter.submittedRoundNumber(JSON.stringify({ roundNumber: 2 })), 2);
+assert.equal(adapter.submittedRoundNumber("lat=12.3&lng=-45.6&round=3"), 3);
+assert.equal(adapter.submittedRoundNumber(JSON.stringify({ guess: { lat: 1, lng: 2 } })), null);
+
+const trainerPollNonce = "runtime-only-nonce";
+const oldGamePollUrl = adapter.trainerPollUrl("game-a", trainerPollNonce);
+const parsedPollUrl = new URL(oldGamePollUrl);
+assert.equal(parsedPollUrl.pathname, "/api/live-challenge/game-a",
+  "the trainer marker leaves the known GET endpoint path unchanged");
+assert.equal(parsedPollUrl.searchParams.get(adapter.TRAINER_POLL_QUERY), trainerPollNonce,
+  "the trainer-only nonce is carried solely as an ordinary query parameter");
+assert.equal(adapter.challengeIdFromUrl(oldGamePollUrl), "game-a",
+  "the endpoint's existing challenge parser tolerates the marked query form");
+assert.equal(adapter.isTrainerPollUrl(oldGamePollUrl, trainerPollNonce), true);
+assert.equal(adapter.isTrainerPollUrl(oldGamePollUrl, "another-runtime"), false);
+assert.deepEqual(adapter.classifyChallengeResource(oldGamePollUrl, {
+  source: "performance",
+  initiatorType: "fetch",
+  trainerPollNonce,
+  fetchTrackingInstalled: false,
+}), { challengeId: "game-a", kind: "trainer-poll" },
+  "the nonce deterministically classifies a poll even when fetch hooks are unavailable");
+assert.deepEqual(adapter.classifyChallengeResource(
+  "https://game-server.geoguessr.com/api/live-challenge/game-b",
+  {
+    source: "performance",
+    initiatorType: "fetch",
+    trainerPollNonce,
+    fetchTrackingInstalled: true,
+  },
+), { challengeId: "game-b", kind: "observed-duplicate" },
+"a hooked GeoGuessr fetch's later Resource Timing entry is not a second discovery event");
+
+const epochs = adapter.createChallengeEpoch();
+const gameA = epochs.observe("game-a", "fetch");
+const delayedGameAPoll = epochs.capture();
+assert.deepEqual(gameA, { challengeId: "game-a", epoch: 1, changed: true, ignored: false });
+const gameB = epochs.observe("game-b", "fetch");
+assert.deepEqual(gameB, { challengeId: "game-b", epoch: 2, changed: true, ignored: false },
+  "game A round 5 to game B round 1 on one lobby creates a new game epoch");
+assert.equal(epochs.owns(delayedGameAPoll), false,
+  "a delayed old-game poll cannot commit after game B discovery");
+assert.deepEqual(epochs.observe("game-a", "trainer-poll"), {
+  challengeId: "game-b", epoch: 2, changed: false, ignored: true,
+}, "the trainer's own game-A poll cannot reclaim authoritative challenge identity");
+assert.equal(epochs.owns(gameB), true);
+const realNow = Date.now;
+let delayedPollObservation;
+try {
+  Date.now = () => 60_000;
+  delayedPollObservation = adapter.classifyChallengeResource(oldGamePollUrl, {
+    source: "performance",
+    initiatorType: "fetch",
+    trainerPollNonce,
+  });
+} finally {
+  Date.now = realNow;
+}
+epochs.observe(delayedPollObservation.challengeId, delayedPollObservation.kind);
+assert.equal(epochs.owns(gameB), true,
+  "a nonce-marked game-A Resource Timing event remains harmless after any delay");
+
+const gameAGuess = adapter.capturedGuessRecord("game-a", 5, { lat: 41, lng: -122 }, 1_000);
+assert.equal(adapter.ownedPendingGuess(gameAGuess, "game-b", 2), null,
+  "a game-A round-5 submitted guess cannot attach to game B round 2");
+assert.equal(adapter.ownedPendingGuess(gameAGuess, "game-a", 4), null,
+  "a submitted guess cannot cross rounds within its game");
+const gameBResult = {
+  currentRoundNumber: 2,
+  rounds: [
+    { location: { panoId: "game-b-one", lat: 10, lng: 20 } },
+    { location: { panoId: "game-b-two", lat: 30, lng: 40 } },
+  ],
+  players: [{
+    guesses: [
+      { lat: 11, lng: 21 },
+      { lat: 35.12345, lng: -97.54321 },
+    ],
+  }],
+};
+const unboundGameBGuess = adapter.capturedGuessRecord(
+  "game-b", null, { lat: 35.12346, lng: -97.5432 }, 2_000,
+);
+const authoritativeGameBGuess = adapter.matchingPendingGuess(
+  gameBResult, "game-b", 2, unboundGameBGuess,
+);
+assert.deepEqual(authoritativeGameBGuess, { lat: 35.12345, lng: -97.54321 },
+  "an unnumbered game-B submission binds only after the authoritative round-2 result");
+const boundGameBGuess = adapter.capturedGuessRecord(
+  "game-b", 2, authoritativeGameBGuess, 2_000,
+);
+assert.deepEqual(adapter.ownedPendingGuess(boundGameBGuess, "game-b", 2),
+  { lat: 35.12345, lng: -97.54321 },
+  "the correctly owned game-B guess remains available to build the blue-dot cloud");
+assert.equal(adapter.matchingPendingGuess(gameBResult, "game-a", 2, unboundGameBGuess), null,
+  "matching an authoritative payload still requires challenge ownership");
+
+const profileMissingGameBResult = {
+  currentRoundNumber: 2,
+  rounds: [
+    { location: { panoId: "game-b-one", lat: 10, lng: 20 } },
+    { location: { panoId: "game-b-two", lat: 30, lng: 40 } },
+  ],
+  players: [],
+};
+const earlyGameBGuess = adapter.capturedGuessRecord(
+  "game-b", null, { lat: 35.5, lng: -97.5 }, 3_000, gameB.epoch,
+);
+assert.equal(adapter.matchingPendingGuess(
+  profileMissingGameBResult, "game-b", 2, earlyGameBGuess, gameB.epoch,
+), null, "the profile-missing payload intentionally provides no coordinate match");
+const safelyBoundGameBGuess = adapter.bindPendingGuessRound(
+  earlyGameBGuess, "game-b", 2, gameB.epoch,
+);
+assert.deepEqual(adapter.ownedPendingGuess(
+  safelyBoundGameBGuess, "game-b", 2, gameB.epoch,
+), { lat: 35.5, lng: -97.5 },
+  "an early game-B guess binds to authoritative round 2 within the same epoch");
+assert.equal(adapter.bindPendingGuessRound(
+  earlyGameBGuess, "game-a", 2, gameB.epoch,
+), null, "authoritative round binding cannot cross challenges");
+assert.equal(adapter.bindPendingGuessRound(
+  earlyGameBGuess, "game-b", 2, gameB.epoch + 1,
+), null, "authoritative round binding cannot cross game epochs");
 
 const storedGuess = adapter.storedGuessRecord(
   "party-game",
