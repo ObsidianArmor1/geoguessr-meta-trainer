@@ -83,6 +83,59 @@
     return rows;
   }
 
+  // Street View images. Every host below serves byte-identical thumbnails and tiles (see
+  // STREETVIEW_IMAGE_HOSTS.md in the Geoguessr project root). clients6 is primary because
+  // streetviewpixels-pa.googleapis.com stopped accepting connections on 2026-11-09. A host that
+  // fails to connect is skipped for ten minutes, remembered across page loads.
+  const STREET_VIEW_IMAGE = /^https:\/\/(?:streetviewpixels-pa\.(?:googleapis|clients6\.google)\.com\/v1\/(thumbnail|tile)\?|(?:geo\d\.ggpht|cbk\d\.google)\.com\/cbk\?)/;
+  const STREET_VIEW_DEAD_MS = 10 * 60 * 1000;
+  const STREET_VIEW_DEAD_KEY = "omt-street-view-dead-hosts";
+  let streetViewDeadMemory = {};
+  function streetViewDead() {
+    // Page storage shares the record across page loads; without it the in-memory copy is kept.
+    try {
+      const raw = root.localStorage ? root.localStorage.getItem(STREET_VIEW_DEAD_KEY) : null;
+      const stored = raw ? JSON.parse(raw) : null;
+      if (stored && typeof stored === "object") streetViewDeadMemory = stored;
+    } catch (_error) {}
+    return streetViewDeadMemory;
+  }
+  function isStreetViewImage(url) {
+    return STREET_VIEW_IMAGE.test(String(url));
+  }
+  // Equivalent URLs for one Street View image, live hosts first, in the canonical order.
+  function streetViewCandidates(url) {
+    const text = String(url);
+    const match = text.match(STREET_VIEW_IMAGE);
+    if (!match) return [text];
+    const params = new URLSearchParams(text.slice(text.indexOf("?") + 1));
+    const kind = match[1] || params.get("output") || "thumbnail";
+    params.delete("output");
+    const query = params.toString();
+    const pano = params.get("panoid") || "";
+    let hash = 0;
+    for (let index = 0; index < pano.length; index += 1) hash = (hash * 31 + pano.charCodeAt(index)) >>> 0;
+    const shard = hash % 4;
+    const all = [
+      `https://streetviewpixels-pa.clients6.google.com/v1/${kind}?${query}`,
+      `https://streetviewpixels-pa.googleapis.com/v1/${kind}?${query}`,
+      `https://geo${shard}.ggpht.com/cbk?output=${kind}&${query}`,
+      `https://cbk${shard}.google.com/cbk?output=${kind}&${query}`,
+    ];
+    const dead = streetViewDead();
+    const now = Date.now();
+    const alive = (candidate) => !((dead[new URL(candidate).host] || 0) > now);
+    return [...all.filter(alive), ...all.filter((candidate) => !alive(candidate))];
+  }
+  function markStreetViewHostDead(url) {
+    try {
+      const dead = streetViewDead();
+      dead[new URL(url).host] = Date.now() + STREET_VIEW_DEAD_MS;
+      streetViewDeadMemory = dead;
+      root.localStorage?.setItem(STREET_VIEW_DEAD_KEY, JSON.stringify(dead));
+    } catch (_error) {}
+  }
+
   function thumbnail(panoId, heading, width = 448, height = 256) {
     const query = new URLSearchParams({
       cb_client: "apiv3",
@@ -93,7 +146,7 @@
       yaw: String(heading),
       thumbfov: "90",
     });
-    return `https://streetviewpixels-pa.googleapis.com/v1/thumbnail?${query}`;
+    return `https://streetviewpixels-pa.clients6.google.com/v1/thumbnail?${query}`;
   }
 
   class UniversalSimilarity {
@@ -266,7 +319,25 @@
 
     async fetchBitmaps(panoId, headings) {
       const urls = headings.map((heading) => thumbnail(panoId, heading));
-      const buffers = await Promise.all(urls.map((url) => this.transport(url)));
+      // Each view tries the equivalent Street View hosts in turn; a host that fails is skipped
+      // for ten minutes so later views go straight to one that works.
+      const fetchView = async (url) => {
+        let lastError;
+        for (const candidate of streetViewCandidates(url)) {
+          try {
+            // A dead host hangs instead of refusing, so cap each attempt.
+            return await Promise.race([
+              this.transport(candidate),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Street View host timed out")), 6000)),
+            ]);
+          } catch (error) {
+            lastError = error;
+            markStreetViewHostDead(candidate);
+          }
+        }
+        throw lastError;
+      };
+      const buffers = await Promise.all(urls.map(fetchView));
       const bitmaps = await Promise.all(buffers.map((buffer) => (
         createImageBitmap(new Blob([buffer], { type: "image/jpeg" }))
       )));
@@ -422,6 +493,10 @@
 
     static thumbnail(...args) {
       return thumbnail(...args);
+    }
+
+    static streetViewCandidates(url) {
+      return streetViewCandidates(url);
     }
 
     static unit(values) {

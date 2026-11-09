@@ -94,7 +94,7 @@ async function main() {
           assert.ok(board.modes.every((mode) => mode.guessMatch));
           assert.ok(board.modes.every((mode) => mode.entries.length === 7));
           assert.ok(board.modes.every((mode) => mode.guessMatch.view.startsWith(
-            "https://streetviewpixels-pa.googleapis.com/v1/thumbnail?",
+            "https://streetviewpixels-pa.clients6.google.com/v1/thumbnail?",
           )));
         } else {
           assert.ok(board.modes.every((mode) => mode.entries.length === 8));

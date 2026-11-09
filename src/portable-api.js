@@ -52,7 +52,7 @@
       yaw: String(heading),
       thumbfov: "90",
     });
-    return `https://streetviewpixels-pa.googleapis.com/v1/thumbnail?${query}`;
+    return `https://streetviewpixels-pa.clients6.google.com/v1/thumbnail?${query}`;
   }
 
   function reviewPriority(bits, members, percentile, panoramas, minimum) {

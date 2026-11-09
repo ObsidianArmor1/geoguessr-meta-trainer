@@ -337,3 +337,27 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+// Street View host fallback: equivalent URLs in the canonical order, dead hosts last.
+{
+  const api = require("../src/cradio-client.js");
+  const primary = "https://streetviewpixels-pa.clients6.google.com/v1/thumbnail?cb_client=apiv3&w=448&h=256&pitch=0&panoid=abc&yaw=90&thumbfov=90";
+  assert.ok(api.isStreetViewImage(primary));
+  assert.ok(api.isStreetViewImage("https://geo2.ggpht.com/cbk?output=tile&cb_client=apiv3&panoid=abc&x=0&y=0&zoom=0"));
+  assert.ok(!api.isStreetViewImage("https://example.com/v1/thumbnail?panoid=abc"));
+  const hosts = api.streetViewCandidates(primary).map((url) => new URL(url).host);
+  assert.equal(hosts[0], "streetviewpixels-pa.clients6.google.com");
+  assert.equal(hosts[1], "streetviewpixels-pa.googleapis.com");
+  assert.match(hosts[2], /^geo[0-3]\.ggpht\.com$/);
+  assert.match(hosts[3], /^cbk[0-3]\.google\.com$/);
+  const cbk = api.streetViewCandidates(primary)[2];
+  assert.match(cbk, /\/cbk\?output=thumbnail&/);
+  assert.match(cbk, /yaw=90/);
+  assert.equal((cbk.match(/output=/g) || []).length, 1, "the cbk form carries output exactly once");
+  const fromTile = api.streetViewCandidates("https://cbk1.google.com/cbk?output=tile&cb_client=apiv3&panoid=abc&x=1&y=0&zoom=2");
+  assert.ok(fromTile[0].startsWith("https://streetviewpixels-pa.clients6.google.com/v1/tile?"), "a cbk tile maps back to the v1 tile path");
+  api.markStreetViewHostDead(primary);
+  assert.equal(new URL(api.streetViewCandidates(primary).at(-1)).host, "streetviewpixels-pa.clients6.google.com",
+    "a host marked dead is tried last");
+  console.log("street view host fallback tests passed");
+}

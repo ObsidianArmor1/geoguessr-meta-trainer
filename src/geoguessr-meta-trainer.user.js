@@ -1,17 +1,17 @@
 // ==UserScript==
 // @name         GeoGuessr Meta Trainer
 // @namespace    obsidianarmor-meta-trainer
-// @version      2.2.0-beta.95
+// @version      2.2.0-beta.96
 // @description  Post-round visual similarity for any Street View map, from a precomputed 2-million-panorama corpus.
 // @homepageURL  https://github.com/ObsidianArmor1/geoguessr-meta-trainer
 // @supportURL   https://github.com/ObsidianArmor1/geoguessr-meta-trainer/issues
 // @match        https://www.geoguessr.com/*
 // @require      https://raw.githubusercontent.com/miraclewhips/geoguessr-event-framework/5e449d6b64c828fce5d2915772d61c7f95263e34/geoguessr-event-framework.js
 // @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/portable-api.js
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.95
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.95
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.95
-// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.95
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/live-challenge-adapter.js?v=2.2.0-beta.96
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack-v2.js?v=2.2.0-beta.96
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/lodestar-pack.js?v=2.2.0-beta.96
+// @require      https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/cradio-client.js?v=2.2.0-beta.96
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -24,6 +24,9 @@
 // @connect      huggingface.co
 // @connect      hf.co
 // @connect      streetviewpixels-pa.googleapis.com
+// @connect      streetviewpixels-pa.clients6.google.com
+// @connect      ggpht.com
+// @connect      google.com
 // @connect      obsidianarmor1--geoguessr-cradio-pilot-v1-pilot-query.modal.run
 // @connect      obsidianarmor1--geoguessr-cradio-lodestar-v1-pilot-query.modal.run
 // @updateURL    https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/src/geoguessr-meta-trainer.user.js
@@ -44,7 +47,7 @@
   "use strict";
 
   const DATA_BASE = "https://raw.githubusercontent.com/ObsidianArmor1/geoguessr-meta-trainer/main/data";
-  const USERSCRIPT_VERSION = "2.2.0-beta.95";
+  const USERSCRIPT_VERSION = "2.2.0-beta.96";
   const portableTransport = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -130,6 +133,15 @@
   const liveChallengeAdapter = globalThis.OMTLiveChallenge;
   if (!liveChallengeAdapter) throw new Error("Live Challenge adapter did not load");
   const cradioAdapter = globalThis.OMTModalCradio;
+  // Street View host fallback lives in cradio-client.js; tolerate a cached older module without it.
+  const streetView = {
+    is: (url) => (typeof cradioAdapter.isStreetViewImage === "function"
+      ? cradioAdapter.isStreetViewImage(url)
+      : /^https:\/\/streetviewpixels-pa\./.test(String(url))),
+    candidates: (url) => (typeof cradioAdapter.streetViewCandidates === "function"
+      ? cradioAdapter.streetViewCandidates(url) : [url]),
+    markDead: (url) => { if (typeof cradioAdapter.markStreetViewHostDead === "function") cradioAdapter.markStreetViewHostDead(url); },
+  };
   if (!cradioAdapter) throw new Error("Modal C-RADIO client did not load");
   const cradioClient = new cradioAdapter.ModalCradioClient();
 
@@ -723,7 +735,7 @@
   }
 
   async function imageUrl(path) {
-    if (/^https:\/\/streetviewpixels-pa\.googleapis\.com\//.test(path)) return path;
+    if (streetView.is(path)) return path;
     const viewMatch = String(path).match(/^\/api\/view\/(\d+)\/(\d+)(?:\?(.*))?$/);
     if (viewMatch) {
       const query = new URLSearchParams(viewMatch[3] || "");
@@ -829,7 +841,7 @@
       panoid: String(panoId),
       yaw: String(((Number(heading) || 0) % 360 + 360) % 360),
     });
-    return `https://streetviewpixels-pa.googleapis.com/v1/thumbnail?${query}`;
+    return `https://streetviewpixels-pa.clients6.google.com/v1/thumbnail?${query}`;
   }
 
   // Refit a Street View thumbnail to the box it will be drawn in.
@@ -842,7 +854,7 @@
   // Heading, pitch and horizontal FOV remain unchanged; only display geometry
   // changes. Similarity is still computed from the fixed corpus embedding.
   function fitViewToBox(url, boxWidth, boxHeight) {
-    if (!/^https:\/\/streetviewpixels-pa\.googleapis\.com\//.test(url)) return url;
+    if (!streetView.is(url)) return url;
     if (!(boxWidth > 0) || !(boxHeight > 0)) return url;
     const aspect = boxWidth / boxHeight;
     const width = aspect >= 1 ? 640 : Math.max(1, Math.round(640 * aspect));
@@ -3008,6 +3020,32 @@
     applyMatchTooltipExpansion();
   }
 
+  // Load an image, trying each equivalent Street View host in turn. A host that errors or takes
+  // longer than 4 s is skipped (and remembered as dead for ten minutes); an all-black placeholder
+  // is a real answer meaning "no imagery", so it is not retried elsewhere.
+  async function loadStreetViewImage(image, url) {
+    const isStreetView = streetView.is(url);
+    const candidates = isStreetView ? streetView.candidates(url) : [url];
+    let lastError;
+    for (const candidate of candidates) {
+      if (isStreetView) image.crossOrigin = "anonymous";
+      image.src = candidate;
+      try {
+        if (typeof image.decode === "function") {
+          await Promise.race([
+            image.decode(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("image timed out")), isStreetView ? 4000 : 30000)),
+          ]);
+        }
+        return candidate;
+      } catch (error) {
+        lastError = error;
+        if (isStreetView) streetView.markDead(candidate);
+      }
+    }
+    throw lastError || new Error("image unavailable");
+  }
+
   function imageIsUniformlyBlack(image) {
     if (!image?.complete || image.naturalWidth < 1 || image.naturalHeight < 1) return false;
     try {
@@ -3116,11 +3154,7 @@
         // Every board, tooltip and peek image uses the box-fitting maximum-size
         // request while native Street View remains an on-demand enlargement.
         const fitted = fitViewToBox(resolved, box.width, box.height);
-        if (/^https:\/\/streetviewpixels-pa\.googleapis\.com\//.test(fitted)) {
-          image.crossOrigin = "anonymous";
-        }
-        image.src = fitted;
-        if (typeof image.decode === "function") await image.decode();
+        await loadStreetViewImage(image, fitted);
         const blank = imageIsUniformlyBlack(image);
         image.dataset.omtBoardImageState = blank ? "blank" : "rendered";
         if (contentMode && Number.isInteger(contentSlot)) {
